@@ -41,6 +41,7 @@ model Position {
   lockedQuantity    Decimal   @db.Decimal(19, 4) @default(0) @map("locked_quantity")
   averageEntryPrice Decimal   @db.Decimal(19, 4) @map("average_entry_price") @default(0)
   realizedPnl       Decimal   @default(0) @db.Decimal(19, 4) @map("realized_pnl")
+  status            PositionStatus @default(OPEN)
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
   portfolio         Portfolio @relation(fields: [portfolioId], references: [id])
@@ -79,6 +80,7 @@ model OrderFill {
   orderId                 String   @map("order_id")
   price                   Decimal  @db.Decimal(19, 4)
   quantity                Decimal  @db.Decimal(19, 4)
+  realizedPnl             Decimal  @default(0) @db.Decimal(19, 4) @map("realized_pnl")
   executedAt              DateTime @default(now()) @map("executed_at")
   executionIdempotencyKey String   @default(uuid()) @map("execution_idempotency_key")
 
@@ -163,4 +165,9 @@ enum EventStatus {
   PENDING
   PUBLISHED
   FAILED
+}
+
+enum PositionStatus {
+  OPEN
+  CLOSED
 }

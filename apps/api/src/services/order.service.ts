@@ -1,5 +1,8 @@
 import { Prisma, PrismaClient, OrderSide, OrderType, OrderStatus, Order } from '@prisma/client';
-import { LedgerService } from './ledger.service';export type PlaceOrderDto = {
+import { LedgerService } from './ledger.service';
+import { PositionService } from './position.service';
+
+export type PlaceOrderDto = {
   userId: string;
   portfolioId: string;
   symbol: string;
@@ -72,15 +75,8 @@ export class OrderService {
         
         if (portfolio.userId !== dto.userId) throw new Error('Unauthorized: Portfolio does not belong to user');
 
-        let position = null;
         if (dto.side === 'SELL') {
-          const positions = await tx.$queryRaw<{id: string}[]>`
-            SELECT id FROM positions 
-            WHERE portfolio_id = ${dto.portfolioId} AND symbol = ${dto.symbol} 
-            FOR UPDATE
-          `;
-          if (!positions || positions.length === 0) throw new Error(`Insufficient quantity: No position found for ${dto.symbol}`);
-          position = await tx.position.findUniqueOrThrow({ where: { id: positions[0].id } });
+          await PositionService.checkPosition(tx, dto.portfolioId, dto.symbol, requestedQuantity);
         }
 
         if (dto.side === 'BUY') {
@@ -90,13 +86,8 @@ export class OrderService {
             where: { id: portfolio.id },
             data: { lockedCash: new Prisma.Decimal(portfolio.lockedCash).plus(requiredCash) }
           });
-        } else if (dto.side === 'SELL' && position) {
-          const availableQty = new Prisma.Decimal(position.quantity).minus(position.lockedQuantity);
-          if (availableQty.lt(requestedQuantity)) throw new Error(`Insufficient quantity: Required ${requestedQuantity.toString()}, Available ${availableQty.toString()}`);
-          await tx.position.update({
-            where: { id: position.id },
-            data: { lockedQuantity: new Prisma.Decimal(position.lockedQuantity).plus(requestedQuantity) }
-          });
+        } else if (dto.side === 'SELL') {
+          await PositionService.lockPosition(tx, dto.portfolioId, dto.symbol, requestedQuantity);
         }
 
         const order = await tx.order.create({
@@ -166,6 +157,7 @@ export class OrderService {
 
   public async processFill(dto: FillOrderDto): Promise<Order> {
     const fillQty = new Prisma.Decimal(dto.quantity);
+    const fillPrice = new Prisma.Decimal(dto.price);
     if (fillQty.lte(0)) throw new Error('Fill quantity must be greater than zero');
 
     try {
@@ -176,7 +168,6 @@ export class OrderService {
 
         const order = await tx.order.findUniqueOrThrow({ where: { id: dto.orderId } });
         
-        // Concurrency duplicate prevention: safely abort if already fully filled or no remaining quantity.
         if (order.status !== OrderStatus.PENDING && order.status !== OrderStatus.PARTIALLY_FILLED) {
           return order;
         }
@@ -203,7 +194,6 @@ export class OrderService {
           throw new Error(`Invalid state transition from ${order.status} to ${newState}`);
         }
 
-        // Update Order
         const updatedOrder = await tx.order.update({
           where: { id: order.id },
           data: {
@@ -216,15 +206,16 @@ export class OrderService {
         const fill = await tx.orderFill.create({
           data: {
             orderId: order.id,
-            price: new Prisma.Decimal(dto.price),
+            price: fillPrice,
             quantity: fillQty,
-            executionIdempotencyKey: dto.fillIdempotencyKey
+            executionIdempotencyKey: dto.fillIdempotencyKey,
+            realizedPnl: 0 // Will be updated for SELL later
           }
         });
 
         const portfolio = await tx.portfolio.findUniqueOrThrow({ where: { id: order.portfolioId } });
-        
-        const actualCost = fillQty.mul(fill.price);
+        const actualCost = fillQty.mul(fillPrice);
+        let fillRealizedPnl = new Prisma.Decimal(0);
 
         if (order.side === 'BUY') {
           const reservationPrice = new Prisma.Decimal(order.reservationPrice || 0);
@@ -238,43 +229,16 @@ export class OrderService {
             }
           });
 
-          const position = await tx.position.findUnique({
-            where: { portfolioId_symbol: { portfolioId: order.portfolioId, symbol: order.symbol } }
-          });
+          await PositionService.adjustOnBuy(tx, order.portfolioId, order.symbol, fillQty, fillPrice);
 
-          if (position) {
-            const totalCost = new Prisma.Decimal(position.quantity).mul(position.averageEntryPrice).plus(actualCost);
-            const newQty = new Prisma.Decimal(position.quantity).plus(fillQty);
-            const newAvgPrice = totalCost.div(newQty);
-            
-            await tx.position.update({
-              where: { id: position.id },
-              data: {
-                quantity: newQty,
-                averageEntryPrice: newAvgPrice
-              }
-            });
-          } else {
-            await tx.position.create({
-              data: {
-                portfolioId: order.portfolioId,
-                symbol: order.symbol,
-                quantity: fillQty,
-                averageEntryPrice: fill.price
-              }
-            });
-          }
         } else {
-          const position = await tx.position.findUniqueOrThrow({
-            where: { portfolioId_symbol: { portfolioId: order.portfolioId, symbol: order.symbol } }
-          });
+          
+          const { realizedPnl } = await PositionService.adjustOnSell(tx, order.portfolioId, order.symbol, fillQty, fillPrice);
+          fillRealizedPnl = realizedPnl;
 
-          await tx.position.update({
-            where: { id: position.id },
-            data: {
-              lockedQuantity: new Prisma.Decimal(position.lockedQuantity).minus(fillQty),
-              quantity: new Prisma.Decimal(position.quantity).minus(fillQty)
-            }
+          await tx.orderFill.update({
+            where: { id: fill.id },
+            data: { realizedPnl: fillRealizedPnl }
           });
 
           await tx.portfolio.update({

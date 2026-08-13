@@ -1,0 +1,153 @@
+import { Server as HttpServer } from 'http';
+import { Server, Socket } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import Redis from 'ioredis';
+import { PrismaClient } from '@prisma/client';
+import pino from 'pino';
+
+const logger = pino({
+  transport: {
+    target: 'pino-pretty',
+    options: { colorize: true, ignore: 'pid,hostname' }
+  }
+});
+
+export const MAX_MARKET_SUBSCRIPTIONS_PER_SOCKET = 50;
+
+export interface EventEnvelope {
+  eventId: string;
+  type: string;
+  timestamp: string;
+  payload: Record<string, unknown>;
+}
+
+export class WebSocketServer {
+  public readonly io: Server;
+  private readonly pubClient: Redis;
+  private readonly subClient: Redis;
+  private readonly prisma: PrismaClient;
+
+  constructor(httpServer: HttpServer, redisUrl: string, prisma: PrismaClient) {
+    this.prisma = prisma;
+    
+    // Create Redis clients for the adapter
+    this.pubClient = new Redis(redisUrl, { maxRetriesPerRequest: null });
+    this.subClient = this.pubClient.duplicate();
+
+    this.io = new Server(httpServer, {
+      cors: {
+        origin: '*',
+      },
+      adapter: createAdapter(this.pubClient, this.subClient),
+      pingTimeout: 5000,
+      pingInterval: 10000,
+    });
+
+    this.setupAuthentication();
+    this.setupEventHandlers();
+  }
+
+  private setupAuthentication() {
+    this.io.use((socket, next) => {
+      // Reusing the REST API's current simplified auth mechanism (userId as string)
+      // In the future this will be replaced with real JWT verification.
+      const userId = socket.handshake.auth?.userId || socket.handshake.headers['x-user-id'];
+      
+      if (!userId || typeof userId !== 'string') {
+        return next(new Error('Authentication Error: Missing or invalid userId'));
+      }
+      
+      socket.data.userId = userId;
+      socket.data.marketSubscriptions = new Set<string>();
+      next();
+    });
+  }
+
+  private setupEventHandlers() {
+    this.io.on('connection', (socket: Socket) => {
+      logger.info({ socketId: socket.id, userId: socket.data.userId }, 'WebSocket client connected');
+
+      socket.on('join_portfolio', async (portfolioId: string, callback: (response: { success: boolean; error?: string }) => void) => {
+        try {
+          if (!portfolioId || typeof portfolioId !== 'string') {
+            callback?.({ success: false, error: 'Invalid portfolioId' });
+            return;
+          }
+
+          const portfolio = await this.prisma.portfolio.findUnique({
+            where: { id: portfolioId }
+          });
+
+          if (!portfolio) {
+            callback?.({ success: false, error: 'Portfolio not found' });
+            return;
+          }
+
+          if (portfolio.userId !== socket.data.userId) {
+            callback?.({ success: false, error: 'Unauthorized: Cannot subscribe to another user\'s portfolio' });
+            return;
+          }
+
+          const room = `portfolio:${portfolioId}`;
+          await socket.join(room);
+          logger.info({ socketId: socket.id, portfolioId }, 'Client joined portfolio room');
+          callback?.({ success: true });
+        } catch (error) {
+          logger.error({ err: error, socketId: socket.id }, 'Error in join_portfolio');
+          callback?.({ success: false, error: 'Internal Server Error' });
+        }
+      });
+
+      socket.on('join_market', async (symbol: string, callback: (response: { success: boolean; error?: string }) => void) => {
+        try {
+          if (!symbol || typeof symbol !== 'string') {
+            callback?.({ success: false, error: 'Invalid symbol' });
+            return;
+          }
+
+          const subscriptions: Set<string> = socket.data.marketSubscriptions;
+          if (subscriptions.has(symbol)) {
+            callback?.({ success: true }); // Already subscribed
+            return;
+          }
+
+          if (subscriptions.size >= MAX_MARKET_SUBSCRIPTIONS_PER_SOCKET) {
+            callback?.({ success: false, error: `Maximum market subscriptions (${MAX_MARKET_SUBSCRIPTIONS_PER_SOCKET}) reached` });
+            return;
+          }
+
+          const room = `market:${symbol}`;
+          await socket.join(room);
+          subscriptions.add(symbol);
+          logger.debug({ socketId: socket.id, symbol }, 'Client joined market room');
+          callback?.({ success: true });
+        } catch (error) {
+          logger.error({ err: error, socketId: socket.id }, 'Error in join_market');
+          callback?.({ success: false, error: 'Internal Server Error' });
+        }
+      });
+
+      socket.on('leave_market', async (symbol: string, callback: (response: { success: boolean; error?: string }) => void) => {
+        try {
+          const room = `market:${symbol}`;
+          await socket.leave(room);
+          socket.data.marketSubscriptions.delete(symbol);
+          callback?.({ success: true });
+        } catch (_error) {
+          callback?.({ success: false, error: 'Internal Server Error' });
+        }
+      });
+
+      socket.on('disconnect', () => {
+        logger.info({ socketId: socket.id, userId: socket.data.userId }, 'WebSocket client disconnected');
+        // socket.io automatically leaves all rooms on disconnect
+      });
+    });
+  }
+
+  public async close() {
+    this.io.close();
+    await this.pubClient.quit();
+    await this.subClient.quit();
+  }
+}
