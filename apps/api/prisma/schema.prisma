@@ -19,16 +19,16 @@ model User {
 }
 
 model Portfolio {
-  id           String    @id @default(uuid())
-  userId       String    @map("user_id")
-  cashBalance  Decimal   @default(0) @db.Decimal(19, 4) @map("cash_balance")
-  totalEquity  Decimal   @default(0) @db.Decimal(19, 4) @map("total_equity")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  id            String    @id @default(uuid())
+  userId        String    @map("user_id")
+  totalCash     Decimal   @default(0) @db.Decimal(19, 4) @map("total_cash")
+  lockedCash    Decimal   @default(0) @db.Decimal(19, 4) @map("locked_cash")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  user         User       @relation(fields: [userId], references: [id])
-  positions    Position[]
-  orders       Order[]
+  user          User       @relation(fields: [userId], references: [id])
+  positions     Position[]
+  orders        Order[]
 
   @@map("portfolios")
 }
@@ -37,8 +37,9 @@ model Position {
   id                String    @id @default(uuid())
   portfolioId       String    @map("portfolio_id")
   symbol            String
-  quantity          Decimal   @db.Decimal(19, 4)
-  averageEntryPrice Decimal   @db.Decimal(19, 4) @map("average_entry_price")
+  quantity          Decimal   @db.Decimal(19, 4) @default(0)
+  lockedQuantity    Decimal   @db.Decimal(19, 4) @default(0) @map("locked_quantity")
+  averageEntryPrice Decimal   @db.Decimal(19, 4) @map("average_entry_price") @default(0)
   realizedPnl       Decimal   @default(0) @db.Decimal(19, 4) @map("realized_pnl")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
@@ -49,25 +50,68 @@ model Position {
 }
 
 model Order {
-  id              String      @id @default(uuid())
-  userId          String      @map("user_id")
-  portfolioId     String      @map("portfolio_id")
-  symbol          String
-  side            OrderSide
-  type            OrderType
-  quantity        Decimal     @db.Decimal(19, 4)
-  requestedPrice  Decimal?    @db.Decimal(19, 4) @map("requested_price")
-  executionPrice  Decimal?    @db.Decimal(19, 4) @map("execution_price")
-  status          OrderStatus @default(PENDING)
-  idempotencyKey  String      @map("idempotency_key")
-  createdAt       DateTime    @default(now()) @map("created_at")
-  updatedAt       DateTime    @updatedAt @map("updated_at")
+  id                String      @id @default(uuid())
+  userId            String      @map("user_id")
+  portfolioId       String      @map("portfolio_id")
+  symbol            String
+  side              OrderSide
+  type              OrderType
+  requestedQuantity Decimal     @db.Decimal(19, 4) @map("requested_quantity")
+  filledQuantity    Decimal     @default(0) @db.Decimal(19, 4) @map("filled_quantity")
+  limitPrice        Decimal?    @db.Decimal(19, 4) @map("limit_price")
+  stopPrice         Decimal?    @db.Decimal(19, 4) @map("stop_price")
+  status            OrderStatus @default(RECEIVED)
+  idempotencyKey    String      @map("idempotency_key")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
 
-  portfolio       Portfolio   @relation(fields: [portfolioId], references: [id])
+  portfolio         Portfolio   @relation(fields: [portfolioId], references: [id])
+  fills             OrderFill[]
 
   @@unique([userId, idempotencyKey], name: "idx_orders_user_idempotency")
   @@index([userId, status], name: "idx_orders_user_status")
   @@map("orders")
+}
+
+model OrderFill {
+  id          String   @id @default(uuid())
+  orderId     String   @map("order_id")
+  price       Decimal  @db.Decimal(19, 4)
+  quantity    Decimal  @db.Decimal(19, 4)
+  executedAt  DateTime @default(now()) @map("executed_at")
+
+  order       Order    @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@map("order_fills")
+}
+
+model LedgerTransaction {
+  id            String   @id @default(uuid())
+  referenceType String   @map("reference_type")
+  referenceId   String   @map("reference_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  entries       LedgerEntry[]
+
+  @@index([referenceType, referenceId])
+  @@map("ledger_transactions")
+}
+
+model LedgerEntry {
+  id            String   @id @default(uuid())
+  transactionId String   @map("transaction_id")
+  accountId     String   @map("account_id")
+  assetType     String   @map("asset_type") // FIAT or SECURITY
+  assetSymbol   String   @map("asset_symbol") // INR, AAPL, etc.
+  debit         Decimal  @default(0) @db.Decimal(19, 4)
+  credit        Decimal  @default(0) @db.Decimal(19, 4)
+
+  transaction   LedgerTransaction @relation(fields: [transactionId], references: [id])
+
+  @@index([transactionId])
+  @@index([accountId])
+  @@map("ledger_entries")
 }
 
 model OutboxEvent {
@@ -91,11 +135,16 @@ enum OrderType {
   MARKET
   LIMIT
   STOP
+  STOP_LIMIT
 }
 
 enum OrderStatus {
+  RECEIVED
+  VALIDATED
+  ACCEPTED
   PENDING
-  EXECUTED
+  PARTIALLY_FILLED
+  FILLED
   REJECTED
   CANCELLED
   EXPIRED
