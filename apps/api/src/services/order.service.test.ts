@@ -163,7 +163,7 @@ describe('OrderService - State Machine & Concurrency (Phase 2.3)', () => {
       expect(finalPortfolio!.lockedCash.toNumber()).toBe(initialPortfolio!.lockedCash.toNumber());
     });
 
-    it('should not allow fills on CANCELLED, EXPIRED, or FILLED orders', async () => {
+    it('should cleanly abort fills on CANCELLED, EXPIRED, or FILLED orders', async () => {
       const dto: PlaceOrderDto = {
         userId, portfolioId, symbol: 'AAPL', side: OrderSide.SELL, type: OrderType.MARKET,
         requestedQuantity: 10, currentMarketPrice: 150, idempotencyKey: `idemp-lifecycle-7-${Date.now()}`
@@ -172,9 +172,9 @@ describe('OrderService - State Machine & Concurrency (Phase 2.3)', () => {
       order = await orderService.markOrderPending(order.id);
       await orderService.expireOrder(order.id);
 
-      await expect(
-        orderService.processFill({ orderId: order.id, price: 150, quantity: 10, fillIdempotencyKey: `fill-fail-2-${Date.now()}` })
-      ).rejects.toThrow('Invalid state transition');
+      const result = await orderService.processFill({ orderId: order.id, price: 150, quantity: 10, fillIdempotencyKey: `fill-fail-2-${Date.now()}` });
+      expect(result.status).toBe(OrderStatus.EXPIRED);
+      expect(result.filledQuantity.toNumber()).toBe(0);
     });
 
     it('should handle concurrent fills safely without overfilling', async () => {
@@ -185,8 +185,7 @@ describe('OrderService - State Machine & Concurrency (Phase 2.3)', () => {
       let order = await orderService.placeOrder(dto);
       order = await orderService.markOrderPending(order.id);
 
-      // Send 15 concurrent fill requests of 10 quantity. 
-      // Only 10 should succeed, the rest should throw 'filledQuantity cannot exceed requestedQuantity'.
+      // Only 10 should actually mutate, the rest should safely abort idempotently.
       const fillRequests = Array.from({ length: 15 }).map((_, i) => 
         orderService.processFill({ orderId: order.id, price: 150, quantity: 10, fillIdempotencyKey: `fill-race-${i}-${Date.now()}` })
       );
@@ -195,8 +194,8 @@ describe('OrderService - State Machine & Concurrency (Phase 2.3)', () => {
       const fulfilled = results.filter(r => r.status === 'fulfilled');
       const rejected = results.filter(r => r.status === 'rejected');
 
-      expect(fulfilled.length).toBe(10);
-      expect(rejected.length).toBe(5);
+      expect(fulfilled.length).toBe(15);
+      expect(rejected.length).toBe(0);
 
       const finalOrder = await prisma.order.findUnique({ where: { id: order.id } });
       expect(finalOrder!.status).toBe(OrderStatus.FILLED);
@@ -228,6 +227,51 @@ describe('OrderService - State Machine & Concurrency (Phase 2.3)', () => {
       const finalPortfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId }});
       // The lockedCash should have fully returned to exactly what it was before the test.
       expect(finalPortfolio!.lockedCash.toNumber()).toBe(initialPortfolio!.lockedCash.toNumber());
+    });
+    it('should cleanly handle idempotent P2002 retries (Crash Scenario C)', async () => {
+      const dto: PlaceOrderDto = {
+        userId, portfolioId, symbol: 'AAPL', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 10, limitPrice: 150, currentMarketPrice: 150, idempotencyKey: `idemp-crash-c-${Date.now()}`
+      };
+      let order = await orderService.placeOrder(dto);
+      order = await orderService.markOrderPending(order.id);
+
+      const fillIdempotencyKey = `fill-crash-c-${Date.now()}`;
+      
+      const firstFill = await orderService.processFill({ orderId: order.id, price: 150, quantity: 10, fillIdempotencyKey });
+      expect(firstFill.status).toBe(OrderStatus.FILLED);
+      
+      const secondFill = await orderService.processFill({ orderId: order.id, price: 150, quantity: 10, fillIdempotencyKey });
+      expect(secondFill.status).toBe(OrderStatus.FILLED);
+      expect(secondFill.filledQuantity.toNumber()).toBe(10);
+    });
+
+    it('should correctly balance the ledger per asset for fills', async () => {
+      const dto: PlaceOrderDto = {
+        userId, portfolioId, symbol: 'AAPL', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 10, limitPrice: 150, currentMarketPrice: 150, idempotencyKey: `idemp-ledger-${Date.now()}`
+      };
+      let order = await orderService.placeOrder(dto);
+      order = await orderService.markOrderPending(order.id);
+
+      const fillIdempotencyKey = `fill-ledger-${Date.now()}`;
+      await orderService.processFill({ orderId: order.id, price: 150, quantity: 10, fillIdempotencyKey });
+
+      const fills = await prisma.orderFill.findMany({ where: { orderId: order.id } });
+      const fillId = fills[0].id;
+
+      const entries = await prisma.ledgerEntry.findMany({
+        where: { transaction: { referenceId: fillId, referenceType: 'ORDER_FILL' } }
+      });
+      
+      const fiatEntries = entries.filter(e => e.assetType === 'FIAT');
+      const secEntries = entries.filter(e => e.assetType === 'SECURITY');
+      
+      const fiatBalance = fiatEntries.reduce((acc, val) => acc + val.debit.toNumber() - val.credit.toNumber(), 0);
+      const secBalance = secEntries.reduce((acc, val) => acc + val.debit.toNumber() - val.credit.toNumber(), 0);
+      
+      expect(fiatBalance).toBe(0);
+      expect(secBalance).toBe(0);
     });
   });
 });

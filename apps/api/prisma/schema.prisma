@@ -75,15 +75,17 @@ model Order {
 }
 
 model OrderFill {
-  id          String   @id @default(uuid())
-  orderId     String   @map("order_id")
-  price       Decimal  @db.Decimal(19, 4)
-  quantity    Decimal  @db.Decimal(19, 4)
-  executedAt  DateTime @default(now()) @map("executed_at")
+  id                      String   @id @default(uuid())
+  orderId                 String   @map("order_id")
+  price                   Decimal  @db.Decimal(19, 4)
+  quantity                Decimal  @db.Decimal(19, 4)
+  executedAt              DateTime @default(now()) @map("executed_at")
+  executionIdempotencyKey String   @default(uuid()) @map("execution_idempotency_key")
 
   order       Order    @relation(fields: [orderId], references: [id])
 
   @@index([orderId])
+  @@unique([orderId, executionIdempotencyKey])
   @@map("order_fills")
 }
 

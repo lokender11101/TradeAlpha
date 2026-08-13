@@ -1,6 +1,5 @@
 import { Prisma, PrismaClient, OrderSide, OrderType, OrderStatus, Order } from '@prisma/client';
-
-export type PlaceOrderDto = {
+import { LedgerService } from './ledger.service';export type PlaceOrderDto = {
   userId: string;
   portfolioId: string;
   symbol: string;
@@ -169,136 +168,164 @@ export class OrderService {
     const fillQty = new Prisma.Decimal(dto.quantity);
     if (fillQty.lte(0)) throw new Error('Fill quantity must be greater than zero');
 
-    return this.prisma.$transaction(async (tx) => {
-      // Deduplicate fill by idempotencyKey to prevent duplicate processing
-      const existingOutbox = await tx.$queryRaw<{id: string}[]>`
-        SELECT id FROM outbox_events WHERE type = 'ORDER_FILLED' AND payload->>'fillIdempotencyKey' = ${dto.fillIdempotencyKey} FOR UPDATE
-      `;
-      if (existingOutbox && existingOutbox.length > 0) {
-        return tx.order.findUniqueOrThrow({ where: { id: dto.orderId } });
-      }
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT 1 FROM portfolios WHERE id = (SELECT portfolio_id FROM orders WHERE id = ${dto.orderId}) FOR UPDATE`;
+        await tx.$executeRaw`SELECT 1 FROM positions WHERE portfolio_id = (SELECT portfolio_id FROM orders WHERE id = ${dto.orderId}) AND symbol = (SELECT symbol FROM orders WHERE id = ${dto.orderId}) FOR UPDATE`;
+        await tx.$executeRaw`SELECT 1 FROM orders WHERE id = ${dto.orderId} FOR UPDATE`;
 
-      await tx.$executeRaw`SELECT 1 FROM portfolios WHERE id = (SELECT portfolio_id FROM orders WHERE id = ${dto.orderId}) FOR UPDATE`;
-      await tx.$executeRaw`SELECT 1 FROM positions WHERE portfolio_id = (SELECT portfolio_id FROM orders WHERE id = ${dto.orderId}) AND symbol = (SELECT symbol FROM orders WHERE id = ${dto.orderId}) FOR UPDATE`;
-      await tx.$executeRaw`SELECT 1 FROM orders WHERE id = ${dto.orderId} FOR UPDATE`;
-
-      const order = await tx.order.findUniqueOrThrow({ where: { id: dto.orderId } });
-      
-      const newFilledQty = new Prisma.Decimal(order.filledQuantity).plus(fillQty);
-      const requestedQty = new Prisma.Decimal(order.requestedQuantity);
-      
-      if (newFilledQty.gt(requestedQty)) {
-        throw new Error('filledQuantity cannot exceed requestedQuantity');
-      }
-
-      let newState: OrderStatus = OrderStatus.PARTIALLY_FILLED;
-      if (newFilledQty.equals(requestedQty)) {
-        newState = OrderStatus.FILLED;
-      }
-
-      if (!OrderService.isValidTransition(order.status, newState)) {
-        throw new Error(`Invalid state transition from ${order.status} to ${newState}`);
-      }
-
-      // Update Order
-      const updatedOrder = await tx.order.update({
-        where: { id: order.id },
-        data: {
-          filledQuantity: newFilledQty,
-          status: newState
+        const order = await tx.order.findUniqueOrThrow({ where: { id: dto.orderId } });
+        
+        // Concurrency duplicate prevention: safely abort if already fully filled or no remaining quantity.
+        if (order.status !== OrderStatus.PENDING && order.status !== OrderStatus.PARTIALLY_FILLED) {
+          return order;
         }
-      });
 
-      // Update OrderFill
-      const fill = await tx.orderFill.create({
-        data: {
-          orderId: order.id,
-          price: new Prisma.Decimal(dto.price),
-          quantity: fillQty
+        const requestedQty = new Prisma.Decimal(order.requestedQuantity);
+        const currentFilledQty = new Prisma.Decimal(order.filledQuantity);
+        const remainingQty = requestedQty.minus(currentFilledQty);
+
+        if (remainingQty.lte(0)) {
+          return order;
         }
-      });
 
-      const portfolio = await tx.portfolio.findUniqueOrThrow({ where: { id: order.portfolioId } });
+        const newFilledQty = currentFilledQty.plus(fillQty);
+        if (newFilledQty.gt(requestedQty)) {
+          throw new Error('filledQuantity cannot exceed requestedQuantity');
+        }
 
-      if (order.side === 'BUY') {
-        // Decrease locked cash by (fillQty * reservationPrice)
-        // Deduct actual cost from totalCash.
-        const reservationPrice = new Prisma.Decimal(order.reservationPrice || 0);
-        const lockedReleased = fillQty.mul(reservationPrice);
-        const actualCost = fillQty.mul(fill.price);
+        let newState: OrderStatus = OrderStatus.PARTIALLY_FILLED;
+        if (newFilledQty.equals(requestedQty)) {
+          newState = OrderStatus.FILLED;
+        }
 
-        await tx.portfolio.update({
-          where: { id: portfolio.id },
+        if (!OrderService.isValidTransition(order.status, newState)) {
+          throw new Error(`Invalid state transition from ${order.status} to ${newState}`);
+        }
+
+        // Update Order
+        const updatedOrder = await tx.order.update({
+          where: { id: order.id },
           data: {
-            lockedCash: new Prisma.Decimal(portfolio.lockedCash).minus(lockedReleased),
-            totalCash: new Prisma.Decimal(portfolio.totalCash).minus(actualCost)
+            filledQuantity: newFilledQty,
+            status: newState
           }
         });
 
-        // Add to Position
-        const position = await tx.position.findUnique({
-          where: { portfolioId_symbol: { portfolioId: order.portfolioId, symbol: order.symbol } }
+        // Insert OrderFill (Enforcing Idempotency via schema constraint)
+        const fill = await tx.orderFill.create({
+          data: {
+            orderId: order.id,
+            price: new Prisma.Decimal(dto.price),
+            quantity: fillQty,
+            executionIdempotencyKey: dto.fillIdempotencyKey
+          }
         });
 
-        if (position) {
-          const totalCost = new Prisma.Decimal(position.quantity).mul(position.averageEntryPrice).plus(actualCost);
-          const newQty = new Prisma.Decimal(position.quantity).plus(fillQty);
-          const newAvgPrice = totalCost.div(newQty);
-          
+        const portfolio = await tx.portfolio.findUniqueOrThrow({ where: { id: order.portfolioId } });
+        
+        const actualCost = fillQty.mul(fill.price);
+
+        if (order.side === 'BUY') {
+          const reservationPrice = new Prisma.Decimal(order.reservationPrice || 0);
+          const lockedReleased = fillQty.mul(reservationPrice);
+
+          await tx.portfolio.update({
+            where: { id: portfolio.id },
+            data: {
+              lockedCash: new Prisma.Decimal(portfolio.lockedCash).minus(lockedReleased),
+              totalCash: new Prisma.Decimal(portfolio.totalCash).minus(actualCost)
+            }
+          });
+
+          const position = await tx.position.findUnique({
+            where: { portfolioId_symbol: { portfolioId: order.portfolioId, symbol: order.symbol } }
+          });
+
+          if (position) {
+            const totalCost = new Prisma.Decimal(position.quantity).mul(position.averageEntryPrice).plus(actualCost);
+            const newQty = new Prisma.Decimal(position.quantity).plus(fillQty);
+            const newAvgPrice = totalCost.div(newQty);
+            
+            await tx.position.update({
+              where: { id: position.id },
+              data: {
+                quantity: newQty,
+                averageEntryPrice: newAvgPrice
+              }
+            });
+          } else {
+            await tx.position.create({
+              data: {
+                portfolioId: order.portfolioId,
+                symbol: order.symbol,
+                quantity: fillQty,
+                averageEntryPrice: fill.price
+              }
+            });
+          }
+        } else {
+          const position = await tx.position.findUniqueOrThrow({
+            where: { portfolioId_symbol: { portfolioId: order.portfolioId, symbol: order.symbol } }
+          });
+
           await tx.position.update({
             where: { id: position.id },
             data: {
-              quantity: newQty,
-              averageEntryPrice: newAvgPrice
+              lockedQuantity: new Prisma.Decimal(position.lockedQuantity).minus(fillQty),
+              quantity: new Prisma.Decimal(position.quantity).minus(fillQty)
             }
           });
-        } else {
-          await tx.position.create({
+
+          await tx.portfolio.update({
+            where: { id: portfolio.id },
             data: {
-              portfolioId: order.portfolioId,
-              symbol: order.symbol,
-              quantity: fillQty,
-              averageEntryPrice: fill.price
+              totalCash: new Prisma.Decimal(portfolio.totalCash).plus(actualCost)
             }
           });
         }
-      } else {
-        // SELL
-        // Decrease lockedQuantity and total quantity.
-        // Increase totalCash by actual proceeds.
-        const position = await tx.position.findUniqueOrThrow({
-          where: { portfolioId_symbol: { portfolioId: order.portfolioId, symbol: order.symbol } }
-        });
 
-        const actualProceeds = fillQty.mul(fill.price);
+        const fiatAccount = `user_cash_${order.userId}`;
+        const secAccount = `user_sec_${order.userId}_${order.symbol}`;
+        const platformFiatAccount = `platform_cash`;
+        const platformSecAccount = `platform_sec_${order.symbol}`;
 
-        await tx.position.update({
-          where: { id: position.id },
-          data: {
-            lockedQuantity: new Prisma.Decimal(position.lockedQuantity).minus(fillQty),
-            quantity: new Prisma.Decimal(position.quantity).minus(fillQty)
-          }
-        });
-
-        await tx.portfolio.update({
-          where: { id: portfolio.id },
-          data: {
-            totalCash: new Prisma.Decimal(portfolio.totalCash).plus(actualProceeds)
-          }
-        });
-      }
-
-      await tx.outboxEvent.create({
-        data: { 
-          type: 'ORDER_FILLED', 
-          aggregateType: 'Order',
-          aggregateId: order.id,
-          payload: { orderId: order.id, fillIdempotencyKey: dto.fillIdempotencyKey } 
+        const ledgerEntries = [];
+        if (order.side === 'BUY') {
+           ledgerEntries.push({ accountId: fiatAccount, assetType: 'FIAT', assetSymbol: 'USD', debit: actualCost, credit: 0 });
+           ledgerEntries.push({ accountId: platformFiatAccount, assetType: 'FIAT', assetSymbol: 'USD', debit: 0, credit: actualCost });
+           ledgerEntries.push({ accountId: platformSecAccount, assetType: 'SECURITY', assetSymbol: order.symbol, debit: fillQty, credit: 0 });
+           ledgerEntries.push({ accountId: secAccount, assetType: 'SECURITY', assetSymbol: order.symbol, debit: 0, credit: fillQty });
+        } else {
+           ledgerEntries.push({ accountId: fiatAccount, assetType: 'FIAT', assetSymbol: 'USD', debit: 0, credit: actualCost });
+           ledgerEntries.push({ accountId: platformFiatAccount, assetType: 'FIAT', assetSymbol: 'USD', debit: actualCost, credit: 0 });
+           ledgerEntries.push({ accountId: platformSecAccount, assetType: 'SECURITY', assetSymbol: order.symbol, debit: 0, credit: fillQty });
+           ledgerEntries.push({ accountId: secAccount, assetType: 'SECURITY', assetSymbol: order.symbol, debit: fillQty, credit: 0 });
         }
-      });
 
-      return updatedOrder;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+        await LedgerService.recordTransaction(tx, 'ORDER_FILL', fill.id, ledgerEntries);
+
+        await tx.outboxEvent.create({
+          data: { 
+            type: 'ORDER_FILLED', 
+            aggregateType: 'Order',
+            aggregateId: order.id,
+            payload: { orderId: order.id, fillIdempotencyKey: dto.fillIdempotencyKey } 
+          }
+        });
+
+        return updatedOrder;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const target = error.meta?.target as any;
+        const targetStr = Array.isArray(target) ? target.join(',') : String(target);
+        if (targetStr.includes('execution_idempotency_key')) {
+          return this.prisma.order.findUniqueOrThrow({ where: { id: dto.orderId } });
+        }
+      }
+      throw error;
+    }
   }
 
   public async cancelOrder(orderId: string): Promise<Order> {
