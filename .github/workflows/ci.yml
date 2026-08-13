@@ -48,10 +48,18 @@ jobs:
         run: npm ci
         
       - name: Lint
-        run: npm run lint
+        run: npm run lint:all
         
+      - name: Typecheck
+        run: npm run typecheck:all
+        
+      - name: Database Setup
+        run: cd apps/api && npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://tradealpha:password@localhost:5432/tradealpha_test?schema=public
+
       - name: Test
-        run: npm run test
+        run: npm run test:all
         env:
           DATABASE_URL: postgresql://tradealpha:password@localhost:5432/tradealpha_test?schema=public
           REDIS_URL: redis://localhost:6379
