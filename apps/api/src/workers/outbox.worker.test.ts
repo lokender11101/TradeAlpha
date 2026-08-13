@@ -112,7 +112,6 @@ describe('Transactional Outbox Worker (Phase 2.4)', () => {
   });
 
   it('should correctly increment attempts and schedule retry on publish failure', async () => {
-    // @ts-expect-error - accessing private property for mocking
     worker1['queue'].add = jest.fn().mockRejectedValueOnce(new Error('Redis timeout'));
 
     const event = await prisma.outboxEvent.create({
@@ -139,7 +138,6 @@ describe('Transactional Outbox Worker (Phase 2.4)', () => {
   });
 
   it('should permanently fail event after MAX_RETRIES', async () => {
-    // @ts-expect-error - accessing private property for mocking
     worker1['queue'].add = jest.fn().mockRejectedValue(new Error('Fatal Redis Error'));
 
     const event = await prisma.outboxEvent.create({
@@ -160,5 +158,50 @@ describe('Transactional Outbox Worker (Phase 2.4)', () => {
     expect(failed?.status).toBe(EventStatus.FAILED);
     expect(failed?.attempts).toBe(5);
     expect(failed?.nextRetryAt).toBeNull(); // Permanently failed
+  });
+
+  it('should handle worker crash after publish but before marking PUBLISHED (Crash scenario A & B)', async () => {
+    // We simulate a crash by intercepting the prisma.$executeRaw used to mark PUBLISHED
+    // so it throws an error after the queue.add succeeds.
+    const originalExecuteRaw = prisma.$executeRaw;
+    prisma.$executeRaw = jest.fn().mockRejectedValueOnce(new Error('Simulated DB Crash'));
+
+    const event = await prisma.outboxEvent.create({
+      data: {
+        type: 'ORDER_ACCEPTED',
+        aggregateType: 'Order',
+        aggregateId: 'crash-order',
+        payload: { orderId: 'crash-order' },
+        status: EventStatus.PENDING
+      }
+    });
+
+    // Worker 1 runs and "crashes" during DB ack
+    await worker1.processOutbox();
+
+    // A real crash means the worker process dies immediately.
+    // In our implementation, the single-query Lease Pattern (`UPDATE ... RETURNING`) already
+    // set next_retry_at = +1 minute while leaving status as PENDING.
+    // Since we mocked $executeRaw to throw, the catch block runs, but because it's a mock
+    // without a fallback, it doesn't write to the DB. This perfectly simulates a process crash
+    // where no subsequent DB writes occur.
+    
+    const crashedEvent = await prisma.outboxEvent.findUnique({ where: { id: event.id } });
+    expect(crashedEvent?.status).toBe(EventStatus.PENDING); // Status remains PENDING
+    expect(crashedEvent?.nextRetryAt).not.toBeNull(); // But a lease is held!
+
+    // Worker 2 (restart) picks it up when time arrives.
+    // For test, we force nextRetryAt to past
+    await prisma.$executeRaw`UPDATE outbox_events SET next_retry_at = NOW() - INTERVAL '1 minute' WHERE id = ${event.id}`;
+
+    // Restore prisma execute
+    prisma.$executeRaw = originalExecuteRaw;
+
+    await worker2.processOutbox();
+
+    // Event should finally be PUBLISHED
+    const finalEvent = await prisma.outboxEvent.findUnique({ where: { id: event.id } });
+    expect(finalEvent?.status).toBe(EventStatus.PUBLISHED);
+    expect(finalEvent?.publishedAt).not.toBeNull();
   });
 });
