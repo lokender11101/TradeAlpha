@@ -1,0 +1,220 @@
+diff --git a/apps/api/src/services/market-simulator.service.test.ts b/apps/api/src/services/market-simulator.service.test.ts
+new file mode 100644
+index 0000000..d751ff5
+--- /dev/null
++++ b/apps/api/src/services/market-simulator.service.test.ts
+@@ -0,0 +1,102 @@
++import { MarketSimulatorService, MarketTick } from './market-simulator.service';
++import { Decimal } from '@prisma/client/runtime/library';
++
++describe('Market Data Simulator (Phase 2.5)', () => {
++  let simulator: MarketSimulatorService;
++
++  beforeEach(() => {
++    simulator = new MarketSimulatorService();
++    jest.useFakeTimers();
++  });
++
++  afterEach(() => {
++    simulator.stopAll();
++    jest.clearAllTimers();
++    jest.useRealTimers();
++  });
++
++  it('should push a deterministic tick and emit an event', (done) => {
++    simulator.on('tick', (tick: MarketTick) => {
++      expect(tick.symbol).toBe('AAPL');
++      expect(tick.price.toString()).toBe('150.5');
++      expect(tick.timestamp).toBeInstanceOf(Date);
++      done();
++    });
++
++    simulator.pushTick('AAPL', '150.50');
++    expect(simulator.getLatestPrice('AAPL')?.toString()).toBe('150.5');
++  });
++
++  it('should start a simulation and emit ticks automatically', () => {
++    const tickHandler = jest.fn();
++    simulator.on('tick', tickHandler);
++
++    simulator.startSimulation({
++      symbol: 'TSLA',
++      initialPrice: '200',
++      volatility: 0.05,
++      intervalMs: 1000
++    });
++
++    expect(simulator.getLatestPrice('TSLA')?.toString()).toBe('200');
++    expect(tickHandler).not.toHaveBeenCalled();
++
++    // Advance 1 interval
++    jest.advanceTimersByTime(1000);
++    expect(tickHandler).toHaveBeenCalledTimes(1);
++
++    const firstTick: MarketTick = tickHandler.mock.calls[0][0];
++    expect(firstTick.symbol).toBe('TSLA');
++    
++    // Price should have changed slightly
++    const priceStr = firstTick.price.toString();
++    // With 5% volatility, it should be between 190 and 210
++    const priceVal = parseFloat(priceStr);
++    expect(priceVal).toBeGreaterThanOrEqual(190);
++    expect(priceVal).toBeLessThanOrEqual(210);
++
++    // Advance 5 more intervals
++    jest.advanceTimersByTime(5000);
++    expect(tickHandler).toHaveBeenCalledTimes(6);
++  });
++
++  it('should stop simulations correctly', () => {
++    const tickHandler = jest.fn();
++    simulator.on('tick', tickHandler);
++
++    simulator.startSimulation({
++      symbol: 'MSFT',
++      initialPrice: 300,
++      volatility: 0.01,
++      intervalMs: 500
++    });
++
++    jest.advanceTimersByTime(500);
++    expect(tickHandler).toHaveBeenCalledTimes(1);
++
++    simulator.stopSimulation('MSFT');
++
++    jest.advanceTimersByTime(5000);
++    // Should still only have been called once since it was stopped
++    expect(tickHandler).toHaveBeenCalledTimes(1);
++  });
++
++  it('should prevent price from falling to zero or negative', () => {
++    const tickHandler = jest.fn();
++    simulator.on('tick', tickHandler);
++
++    simulator.startSimulation({
++      symbol: 'PENNY',
++      initialPrice: '0.0002',
++      volatility: 0.99, // 99% volatility could drive it down fast
++      intervalMs: 100
++    });
++
++    // Advance enough time to potentially crash the price
++    jest.advanceTimersByTime(10000);
++
++    const latestPrice = simulator.getLatestPrice('PENNY');
++    expect(latestPrice).toBeDefined();
++    expect(latestPrice!.gte(new Decimal('0.0001'))).toBe(true);
++  });
++});
+diff --git a/apps/api/src/services/market-simulator.service.ts b/apps/api/src/services/market-simulator.service.ts
+new file mode 100644
+index 0000000..23aea0c
+--- /dev/null
++++ b/apps/api/src/services/market-simulator.service.ts
+@@ -0,0 +1,106 @@
++import { EventEmitter } from 'events';
++import { Decimal } from '@prisma/client/runtime/library';
++
++export interface MarketTick {
++  symbol: string;
++  price: Decimal;
++  timestamp: Date;
++}
++
++export interface SimulationConfig {
++  symbol: string;
++  initialPrice: string | number;
++  volatility: number; // e.g., 0.01 for 1%
++  intervalMs: number;
++}
++
++export class MarketSimulatorService extends EventEmitter {
++  private activeSimulations: Map<string, NodeJS.Timeout> = new Map();
++  private currentPrices: Map<string, Decimal> = new Map();
++
++  constructor() {
++    super();
++  }
++
++  /**
++   * Starts an automated random walk simulation for a symbol.
++   */
++  public startSimulation(config: SimulationConfig): void {
++    if (this.activeSimulations.has(config.symbol)) {
++      this.stopSimulation(config.symbol);
++    }
++
++    let currentPrice = typeof config.initialPrice === 'string' 
++      ? new Decimal(config.initialPrice)
++      : new Decimal(config.initialPrice.toString());
++      
++    this.currentPrices.set(config.symbol, currentPrice);
++
++    const timer = setInterval(() => {
++      // Random walk: next price = current * (1 + random_change)
++      // random_change is between -volatility and +volatility
++      const change = (Math.random() * 2 - 1) * config.volatility;
++      const multiplier = new Decimal(1).plus(new Decimal(change.toString()));
++      
++      currentPrice = currentPrice.mul(multiplier);
++      
++      // Ensure price doesn't drop to zero or below
++      if (currentPrice.lte(new Decimal('0.0001'))) {
++        currentPrice = new Decimal('0.0001');
++      }
++
++      this.currentPrices.set(config.symbol, currentPrice);
++      this.emitTick(config.symbol, currentPrice);
++    }, config.intervalMs);
++
++    this.activeSimulations.set(config.symbol, timer);
++  }
++
++  /**
++   * Stops an automated simulation for a symbol.
++   */
++  public stopSimulation(symbol: string): void {
++    const timer = this.activeSimulations.get(symbol);
++    if (timer) {
++      clearInterval(timer);
++      this.activeSimulations.delete(symbol);
++    }
++  }
++
++  /**
++   * Stops all automated simulations.
++   */
++  public stopAll(): void {
++    for (const symbol of this.activeSimulations.keys()) {
++      this.stopSimulation(symbol);
++    }
++  }
++
++  /**
++   * Get the last known price for a symbol.
++   */
++  public getLatestPrice(symbol: string): Decimal | undefined {
++    return this.currentPrices.get(symbol);
++  }
++
++  /**
++   * Push a deterministic tick. Useful for tests or manual price injection.
++   */
++  public pushTick(symbol: string, price: string | number): void {
++    const decimalPrice = typeof price === 'string' 
++      ? new Decimal(price)
++      : new Decimal(price.toString());
++
++    this.currentPrices.set(symbol, decimalPrice);
++    this.emitTick(symbol, decimalPrice);
++  }
++
++  private emitTick(symbol: string, price: Decimal): void {
++    const tick: MarketTick = {
++      symbol,
++      price,
++      timestamp: new Date(),
++    };
++    this.emit('tick', tick);
++  }
++}

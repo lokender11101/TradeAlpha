@@ -1,9 +1,8 @@
 import { EventEmitter } from 'events';
-import { Decimal } from '@prisma/client/runtime/library';
 
 export interface MarketTick {
   symbol: string;
-  price: Decimal;
+  price: string;
   timestamp: Date;
 }
 
@@ -16,7 +15,7 @@ export interface SimulationConfig {
 
 export class MarketSimulatorService extends EventEmitter {
   private activeSimulations: Map<string, NodeJS.Timeout> = new Map();
-  private currentPrices: Map<string, Decimal> = new Map();
+  private currentPrices: Map<string, number> = new Map();
 
   constructor() {
     super();
@@ -31,8 +30,8 @@ export class MarketSimulatorService extends EventEmitter {
     }
 
     let currentPrice = typeof config.initialPrice === 'string' 
-      ? new Decimal(config.initialPrice)
-      : new Decimal(config.initialPrice.toString());
+      ? parseFloat(config.initialPrice)
+      : config.initialPrice;
       
     this.currentPrices.set(config.symbol, currentPrice);
 
@@ -40,13 +39,12 @@ export class MarketSimulatorService extends EventEmitter {
       // Random walk: next price = current * (1 + random_change)
       // random_change is between -volatility and +volatility
       const change = (Math.random() * 2 - 1) * config.volatility;
-      const multiplier = new Decimal(1).plus(new Decimal(change.toString()));
       
-      currentPrice = currentPrice.mul(multiplier);
+      currentPrice = currentPrice * (1 + change);
       
       // Ensure price doesn't drop to zero or below
-      if (currentPrice.lte(new Decimal('0.0001'))) {
-        currentPrice = new Decimal('0.0001');
+      if (currentPrice <= 0.0001) {
+        currentPrice = 0.0001;
       }
 
       this.currentPrices.set(config.symbol, currentPrice);
@@ -77,28 +75,29 @@ export class MarketSimulatorService extends EventEmitter {
   }
 
   /**
-   * Get the last known price for a symbol.
+   * Get the last known price for a symbol as a formatted string.
    */
-  public getLatestPrice(symbol: string): Decimal | undefined {
-    return this.currentPrices.get(symbol);
+  public getLatestPrice(symbol: string): string | undefined {
+    const price = this.currentPrices.get(symbol);
+    return price !== undefined ? price.toFixed(4) : undefined;
   }
 
   /**
    * Push a deterministic tick. Useful for tests or manual price injection.
    */
   public pushTick(symbol: string, price: string | number): void {
-    const decimalPrice = typeof price === 'string' 
-      ? new Decimal(price)
-      : new Decimal(price.toString());
+    const numericPrice = typeof price === 'string' 
+      ? parseFloat(price)
+      : price;
 
-    this.currentPrices.set(symbol, decimalPrice);
-    this.emitTick(symbol, decimalPrice);
+    this.currentPrices.set(symbol, numericPrice);
+    this.emitTick(symbol, numericPrice);
   }
 
-  private emitTick(symbol: string, price: Decimal): void {
+  private emitTick(symbol: string, price: number): void {
     const tick: MarketTick = {
       symbol,
-      price,
+      price: price.toFixed(4),
       timestamp: new Date(),
     };
     this.emit('tick', tick);

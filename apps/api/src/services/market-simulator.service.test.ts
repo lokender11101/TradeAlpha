@@ -1,5 +1,4 @@
 import { MarketSimulatorService, MarketTick } from './market-simulator.service';
-import { Decimal } from '@prisma/client/runtime/library';
 
 describe('Market Data Simulator (Phase 2.5)', () => {
   let simulator: MarketSimulatorService;
@@ -18,13 +17,13 @@ describe('Market Data Simulator (Phase 2.5)', () => {
   it('should push a deterministic tick and emit an event', (done) => {
     simulator.on('tick', (tick: MarketTick) => {
       expect(tick.symbol).toBe('AAPL');
-      expect(tick.price.toString()).toBe('150.5');
+      expect(tick.price).toBe('150.5000');
       expect(tick.timestamp).toBeInstanceOf(Date);
       done();
     });
 
     simulator.pushTick('AAPL', '150.50');
-    expect(simulator.getLatestPrice('AAPL')?.toString()).toBe('150.5');
+    expect(simulator.getLatestPrice('AAPL')).toBe('150.5000');
   });
 
   it('should start a simulation and emit ticks automatically', () => {
@@ -38,7 +37,7 @@ describe('Market Data Simulator (Phase 2.5)', () => {
       intervalMs: 1000
     });
 
-    expect(simulator.getLatestPrice('TSLA')?.toString()).toBe('200');
+    expect(simulator.getLatestPrice('TSLA')).toBe('200.0000');
     expect(tickHandler).not.toHaveBeenCalled();
 
     // Advance 1 interval
@@ -49,7 +48,7 @@ describe('Market Data Simulator (Phase 2.5)', () => {
     expect(firstTick.symbol).toBe('TSLA');
     
     // Price should have changed slightly
-    const priceStr = firstTick.price.toString();
+    const priceStr = firstTick.price;
     // With 5% volatility, it should be between 190 and 210
     const priceVal = parseFloat(priceStr);
     expect(priceVal).toBeGreaterThanOrEqual(190);
@@ -95,8 +94,9 @@ describe('Market Data Simulator (Phase 2.5)', () => {
     // Advance enough time to potentially crash the price
     jest.advanceTimersByTime(10000);
 
-    const latestPrice = simulator.getLatestPrice('PENNY');
-    expect(latestPrice).toBeDefined();
-    expect(latestPrice!.gte(new Decimal('0.0001'))).toBe(true);
+    const latestPriceStr = simulator.getLatestPrice('PENNY');
+    expect(latestPriceStr).toBeDefined();
+    const latestPrice = parseFloat(latestPriceStr!);
+    expect(latestPrice).toBeGreaterThanOrEqual(0.0001);
   });
 });
