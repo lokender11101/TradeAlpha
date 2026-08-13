@@ -117,7 +117,12 @@ export class OrderService {
         });
 
         await tx.outboxEvent.create({
-          data: { type: 'ORDER_ACCEPTED', payload: { orderId: order.id, userId: order.userId } }
+          data: { 
+            type: 'ORDER_ACCEPTED', 
+            aggregateType: 'Order', 
+            aggregateId: order.id, 
+            payload: { orderId: order.id, userId: order.userId } 
+          }
         });
 
         return order;
@@ -142,10 +147,21 @@ export class OrderService {
         throw new Error(`Invalid state transition from ${order.status} to PENDING`);
       }
       
-      return tx.order.update({
+      const updatedOrder = await tx.order.update({
         where: { id: orderId },
         data: { status: OrderStatus.PENDING }
       });
+
+      await tx.outboxEvent.create({
+        data: { 
+          type: 'ORDER_PENDING', 
+          aggregateType: 'Order',
+          aggregateId: updatedOrder.id,
+          payload: { orderId: updatedOrder.id } 
+        }
+      });
+
+      return updatedOrder;
     });
   }
 
@@ -273,7 +289,12 @@ export class OrderService {
       }
 
       await tx.outboxEvent.create({
-        data: { type: 'ORDER_FILLED', payload: { orderId: order.id, fillIdempotencyKey: dto.fillIdempotencyKey } }
+        data: { 
+          type: 'ORDER_FILLED', 
+          aggregateType: 'Order',
+          aggregateId: order.id,
+          payload: { orderId: order.id, fillIdempotencyKey: dto.fillIdempotencyKey } 
+        }
       });
 
       return updatedOrder;
@@ -322,7 +343,12 @@ export class OrderService {
       });
 
       await tx.outboxEvent.create({
-        data: { type: 'ORDER_CANCELLED', payload: { orderId: order.id } }
+        data: { 
+          type: 'ORDER_CANCELLED', 
+          aggregateType: 'Order',
+          aggregateId: order.id,
+          payload: { orderId: order.id } 
+        }
       });
 
       return updatedOrder;
@@ -371,7 +397,12 @@ export class OrderService {
       });
 
       await tx.outboxEvent.create({
-        data: { type: 'ORDER_EXPIRED', payload: { orderId: order.id } }
+        data: { 
+          type: 'ORDER_EXPIRED', 
+          aggregateType: 'Order',
+          aggregateId: order.id,
+          payload: { orderId: order.id } 
+        }
       });
 
       return updatedOrder;

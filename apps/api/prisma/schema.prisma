@@ -116,14 +116,20 @@ model LedgerEntry {
 }
 
 model OutboxEvent {
-  id          String    @id @default(uuid())
-  type        String
-  payload     Json
-  status      EventStatus @default(PENDING)
-  createdAt   DateTime  @default(now()) @map("created_at")
-  publishedAt DateTime? @map("published_at")
+  id            String    @id @default(uuid())
+  type          String
+  aggregateType String    @map("aggregate_type")
+  aggregateId   String    @map("aggregate_id")
+  payload       Json
+  status        EventStatus @default(PENDING)
+  attempts      Int       @default(0)
+  nextRetryAt   DateTime? @map("next_retry_at")
+  error         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  publishedAt   DateTime? @map("published_at")
 
-  @@index([status, createdAt])
+  @@index([status, nextRetryAt, createdAt])
+  @@index([aggregateType, aggregateId])
   @@map("outbox_events")
 }
 
