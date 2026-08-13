@@ -190,12 +190,11 @@ describe('Transactional Outbox Worker (Phase 2.4)', () => {
     expect(crashedEvent?.status).toBe(EventStatus.PENDING); // Status remains PENDING
     expect(crashedEvent?.nextRetryAt).not.toBeNull(); // But a lease is held!
 
-    // Worker 2 (restart) picks it up when time arrives.
-    // For test, we force nextRetryAt to past
-    await prisma.$executeRaw`UPDATE outbox_events SET next_retry_at = NOW() - INTERVAL '1 minute' WHERE id = ${event.id}`;
-
     // Restore prisma execute
     prisma.$executeRaw = originalExecuteRaw;
+
+    // For test, we force nextRetryAt to past
+    await prisma.$executeRaw`UPDATE outbox_events SET next_retry_at = NOW() - INTERVAL '1 minute' WHERE id = ${event.id}`;
 
     await worker2.processOutbox();
 

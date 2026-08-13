@@ -69,8 +69,8 @@ export class OutboxWorker {
       SET next_retry_at = NOW() + INTERVAL '1 minute'
       WHERE id IN (
         SELECT id FROM outbox_events
-        WHERE status = 'PENDING' 
-           OR (status = 'FAILED' AND next_retry_at IS NOT NULL AND next_retry_at <= NOW())
+        WHERE status IN ('PENDING', 'FAILED')
+          AND (next_retry_at IS NULL OR next_retry_at <= NOW())
         ORDER BY created_at ASC
         LIMIT ${this.BATCH_SIZE}
         FOR UPDATE SKIP LOCKED
