@@ -50,6 +50,9 @@ jobs:
       - name: Lint
         run: npm run lint:all
         
+      - name: Generate Prisma Client
+        run: cd apps/api && npx prisma generate
+        
       - name: Typecheck
         run: npm run typecheck:all
         
