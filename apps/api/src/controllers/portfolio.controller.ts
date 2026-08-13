@@ -2,28 +2,30 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { PriceCacheService } from '../services/price-cache.service';
 import Redis from 'ioredis';
+import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 
 const prisma = new PrismaClient();
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', { maxRetriesPerRequest: null });
 const priceCache = new PriceCacheService(redis);
 
 export class PortfolioController {
-  static async getPositions(req: Request, res: Response) {
+  static async getPositions(req: AuthenticatedRequest, res: Response) {
     try {
       const portfolioId = req.params.portfolioId as string;
       
-      // In a real app with auth, req.user.id would be verified against portfolio.userId here.
-      // Mocking the check per requirements: portfolio.userId === req.user.id
-      const userId = (req as any).user?.id || (req.headers['x-user-id'] as string);
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
 
       const portfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId } });
       
       if (!portfolio) {
-        return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Portfolio not found' } });
+        return res.status(404).json({ error: 'Portfolio not found' });
       }
 
-      if (userId && portfolio.userId !== userId) {
-        return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Unauthorized' } });
+      if (portfolio.userId !== userId) {
+        return res.status(403).json({ error: 'Forbidden: You do not have access to this portfolio' });
       }
 
       const positions = await prisma.position.findMany({

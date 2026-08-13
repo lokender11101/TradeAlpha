@@ -24,16 +24,21 @@ const logger = pino({
 
 import { OrderController } from './controllers/order.controller';
 import { PortfolioController } from './controllers/portfolio.controller';
+import { AuthController } from './controllers/auth.controller';
+import { authenticateJWT } from './middlewares/auth.middleware';
 
 app.use(cors());
 app.use(express.json());
+
+app.post('/api/auth/register', AuthController.register);
+app.post('/api/auth/login', AuthController.login);
 
 app.get('/health', (req: express.Request, res: express.Response) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.post('/api/orders', OrderController.placeOrder);
-app.get('/api/portfolios/:portfolioId/positions', PortfolioController.getPositions);
+app.post('/api/orders', authenticateJWT, OrderController.placeOrder);
+app.get('/api/portfolios/:portfolioId/positions', authenticateJWT, PortfolioController.getPositions);
 
 app.use((req: express.Request, res: express.Response, _next: express.NextFunction) => {
   res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });

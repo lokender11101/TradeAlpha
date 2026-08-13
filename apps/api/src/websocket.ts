@@ -4,6 +4,7 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
 import { PrismaClient } from '@prisma/client';
 import pino from 'pino';
+import jwt from 'jsonwebtoken';
 
 const logger = pino({
   transport: {
@@ -49,17 +50,24 @@ export class WebSocketServer {
 
   private setupAuthentication() {
     this.io.use((socket, next) => {
-      // Reusing the REST API's current simplified auth mechanism (userId as string)
-      // In the future this will be replaced with real JWT verification.
-      const userId = socket.handshake.auth?.userId || socket.handshake.headers['x-user-id'];
+      const token = socket.handshake.auth?.token;
       
-      if (!userId || typeof userId !== 'string') {
-        return next(new Error('Authentication Error: Missing or invalid userId'));
+      if (!token || typeof token !== 'string') {
+        return next(new Error('Authentication Error: Missing token'));
       }
-      
-      socket.data.userId = userId;
-      socket.data.marketSubscriptions = new Set<string>();
-      next();
+
+      const secret = process.env.JWT_SECRET || 'fallback-secret-for-tests';
+
+      jwt.verify(token, secret, (err: any, decoded: any) => {
+        if (err) {
+          logger.warn({ err }, 'WebSocket JWT Verification Failed');
+          return next(new Error('Authentication Error: Invalid or expired token'));
+        }
+
+        socket.data.userId = decoded.sub as string;
+        socket.data.marketSubscriptions = new Set<string>();
+        next();
+      });
     });
   }
 
