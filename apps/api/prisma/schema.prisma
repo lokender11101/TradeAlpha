@@ -1,0 +1,108 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  passwordHash String      @map("password_hash")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  portfolios   Portfolio[]
+
+  @@map("users")
+}
+
+model Portfolio {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  cashBalance  Decimal   @default(0) @db.Decimal(19, 4) @map("cash_balance")
+  totalEquity  Decimal   @default(0) @db.Decimal(19, 4) @map("total_equity")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  user         User       @relation(fields: [userId], references: [id])
+  positions    Position[]
+  orders       Order[]
+
+  @@map("portfolios")
+}
+
+model Position {
+  id                String    @id @default(uuid())
+  portfolioId       String    @map("portfolio_id")
+  symbol            String
+  quantity          Decimal   @db.Decimal(19, 4)
+  averageEntryPrice Decimal   @db.Decimal(19, 4) @map("average_entry_price")
+  realizedPnl       Decimal   @default(0) @db.Decimal(19, 4) @map("realized_pnl")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  portfolio         Portfolio @relation(fields: [portfolioId], references: [id])
+
+  @@unique([portfolioId, symbol])
+  @@map("positions")
+}
+
+model Order {
+  id              String      @id @default(uuid())
+  userId          String      @map("user_id")
+  portfolioId     String      @map("portfolio_id")
+  symbol          String
+  side            OrderSide
+  type            OrderType
+  quantity        Decimal     @db.Decimal(19, 4)
+  requestedPrice  Decimal?    @db.Decimal(19, 4) @map("requested_price")
+  executionPrice  Decimal?    @db.Decimal(19, 4) @map("execution_price")
+  status          OrderStatus @default(PENDING)
+  idempotencyKey  String      @map("idempotency_key")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  portfolio       Portfolio   @relation(fields: [portfolioId], references: [id])
+
+  @@unique([userId, idempotencyKey], name: "idx_orders_user_idempotency")
+  @@index([userId, status], name: "idx_orders_user_status")
+  @@map("orders")
+}
+
+model OutboxEvent {
+  id          String    @id @default(uuid())
+  type        String
+  payload     Json
+  status      EventStatus @default(PENDING)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  publishedAt DateTime? @map("published_at")
+
+  @@index([status, createdAt])
+  @@map("outbox_events")
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+  STOP
+}
+
+enum OrderStatus {
+  PENDING
+  EXECUTED
+  REJECTED
+  CANCELLED
+  EXPIRED
+}
+
+enum EventStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}

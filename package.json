@@ -1,0 +1,16 @@
+{
+  "name": "tradealpha",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:all": "npm run dev --workspaces",
+    "build:all": "npm run build --workspaces",
+    "test:all": "npm run test --workspaces",
+    "lint:all": "npm run lint --workspaces",
+    "typecheck:all": "npm run typecheck --workspaces"
+  }
+}
