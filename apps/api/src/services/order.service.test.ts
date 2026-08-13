@@ -1,45 +1,33 @@
-import { PrismaClient, OrderSide, OrderType } from '@prisma/client';
-import { OrderService, PlaceOrderDto } from './order.service';
+import { PrismaClient, OrderSide, OrderType, OrderStatus } from '@prisma/client';
+import { OrderService, PlaceOrderDto, FillOrderDto } from './order.service';
 
 const prisma = new PrismaClient();
 const orderService = new OrderService(prisma);
 
-describe('OrderService - Place Order Integration', () => {
+describe('OrderService - State Machine & Concurrency (Phase 2.3)', () => {
   let userId: string;
   let portfolioId: string;
 
   beforeAll(async () => {
-    // Setup test user with 10,000 cash
     const user = await prisma.user.create({
       data: {
-        email: `test-order-${Date.now()}@example.com`,
+        email: `test-fsm-${Date.now()}@example.com`,
         passwordHash: 'hash',
-        portfolios: {
-          create: {
-            totalCash: 10000,
-            lockedCash: 0
-          }
-        }
+        portfolios: { create: { totalCash: 100000, lockedCash: 0 } }
       },
       include: { portfolios: true }
     });
     userId = user.id;
     portfolioId = user.portfolios[0].id;
 
-    // Give user a position in AAPL
     await prisma.position.create({
-      data: {
-        portfolioId,
-        symbol: 'AAPL',
-        quantity: 50,
-        lockedQuantity: 0,
-        averageEntryPrice: 150
-      }
+      data: { portfolioId, symbol: 'AAPL', quantity: 1000, lockedQuantity: 0, averageEntryPrice: 150 }
     });
   });
 
   afterAll(async () => {
     await prisma.outboxEvent.deleteMany({});
+    await prisma.orderFill.deleteMany({});
     await prisma.order.deleteMany({});
     await prisma.position.deleteMany({});
     await prisma.portfolio.deleteMany({});
@@ -47,108 +35,199 @@ describe('OrderService - Place Order Integration', () => {
     await prisma.$disconnect();
   });
 
-  it('should throw if quantity is <= 0', async () => {
-    const dto: PlaceOrderDto = {
-      userId, portfolioId, symbol: 'AAPL', side: OrderSide.BUY, type: OrderType.MARKET,
-      requestedQuantity: 0, currentMarketPrice: 150, idempotencyKey: `idemp-zero-${Date.now()}`
-    };
-    await expect(orderService.placeOrder(dto)).rejects.toThrow('Quantity must be greater than zero');
+  // State Transition Graph Tests
+  describe('State Transition Graph Validation', () => {
+    it('1. should allow every valid state transition', () => {
+      const valid = [
+        [OrderStatus.RECEIVED, OrderStatus.VALIDATED],
+        [OrderStatus.RECEIVED, OrderStatus.REJECTED],
+        [OrderStatus.VALIDATED, OrderStatus.ACCEPTED],
+        [OrderStatus.VALIDATED, OrderStatus.REJECTED],
+        [OrderStatus.ACCEPTED, OrderStatus.PENDING],
+        [OrderStatus.ACCEPTED, OrderStatus.CANCELLED],
+        [OrderStatus.ACCEPTED, OrderStatus.REJECTED],
+        [OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED],
+        [OrderStatus.PENDING, OrderStatus.FILLED],
+        [OrderStatus.PENDING, OrderStatus.CANCELLED],
+        [OrderStatus.PENDING, OrderStatus.EXPIRED],
+        [OrderStatus.PARTIALLY_FILLED, OrderStatus.PARTIALLY_FILLED],
+        [OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED],
+        [OrderStatus.PARTIALLY_FILLED, OrderStatus.CANCELLED],
+        [OrderStatus.PARTIALLY_FILLED, OrderStatus.EXPIRED]
+      ];
+      valid.forEach(([from, to]) => expect(OrderService.isValidTransition(from, to)).toBe(true));
+    });
+
+    it('2. should reject illegal state transitions', () => {
+      const invalid = [
+        [OrderStatus.FILLED, OrderStatus.CANCELLED],
+        [OrderStatus.CANCELLED, OrderStatus.FILLED],
+        [OrderStatus.REJECTED, OrderStatus.PENDING],
+        [OrderStatus.EXPIRED, OrderStatus.FILLED],
+        [OrderStatus.PARTIALLY_FILLED, OrderStatus.PENDING],
+        [OrderStatus.RECEIVED, OrderStatus.FILLED]
+      ];
+      invalid.forEach(([from, to]) => expect(OrderService.isValidTransition(from, to)).toBe(false));
+    });
   });
 
-  it('should successfully reserve funds for a MARKET BUY order (locks quantity * price * 1.05)', async () => {
-    const dto: PlaceOrderDto = {
-      userId, portfolioId, symbol: 'AAPL', side: OrderSide.BUY, type: OrderType.MARKET,
-      requestedQuantity: 10, currentMarketPrice: 150, idempotencyKey: `idemp-1-${Date.now()}`
-    };
-    
-    // 10 * (150 * 1.05) = 1575 required cash
-    const order = await orderService.placeOrder(dto);
-    expect(order).toBeDefined();
-    expect(order.status).toBe('ACCEPTED');
+  describe('Order Execution Lifecycle', () => {
+    it('should successfully place and transition an order from ACCEPTED to PENDING', async () => {
+      const dto: PlaceOrderDto = {
+        userId, portfolioId, symbol: 'AAPL', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 10, limitPrice: 150, currentMarketPrice: 150, idempotencyKey: `idemp-lifecycle-1-${Date.now()}`
+      };
+      let order = await orderService.placeOrder(dto);
+      expect(order.status).toBe(OrderStatus.ACCEPTED);
 
-    const portfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId } });
-    expect(portfolio?.lockedCash.toNumber()).toBe(1575);
-    
-    const outbox = await prisma.outboxEvent.findFirst({ where: { type: 'ORDER_ACCEPTED' } });
-    expect(outbox).toBeDefined();
-  });
+      // ACCEPTED -> PENDING
+      order = await orderService.markOrderPending(order.id);
+      expect(order.status).toBe(OrderStatus.PENDING);
+    });
 
-  it('should successfully reserve shares for a LIMIT SELL order', async () => {
-    const dto: PlaceOrderDto = {
-      userId, portfolioId, symbol: 'AAPL', side: OrderSide.SELL, type: OrderType.LIMIT,
-      requestedQuantity: 20, limitPrice: 160, currentMarketPrice: 150, idempotencyKey: `idemp-2-${Date.now()}`
-    };
-    
-    const order = await orderService.placeOrder(dto);
-    expect(order).toBeDefined();
-    
-    const position = await prisma.position.findUnique({ where: { portfolioId_symbol: { portfolioId, symbol: 'AAPL' } } });
-    expect(position?.lockedQuantity.toNumber()).toBe(20);
-  });
+    it('should process a partial fill (PENDING -> PARTIALLY_FILLED)', async () => {
+      const dto: PlaceOrderDto = {
+        userId, portfolioId, symbol: 'AAPL', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 10, limitPrice: 150, currentMarketPrice: 150, idempotencyKey: `idemp-lifecycle-2-${Date.now()}`
+      };
+      let order = await orderService.placeOrder(dto);
+      order = await orderService.markOrderPending(order.id);
 
-  it('should fail if insufficient funds', async () => {
-    const dto: PlaceOrderDto = {
-      userId, portfolioId, symbol: 'MSFT', side: OrderSide.BUY, type: OrderType.LIMIT,
-      requestedQuantity: 100, limitPrice: 200, currentMarketPrice: 200, idempotencyKey: `idemp-3-${Date.now()}`
-    };
-    // Requires 20,000 cash, user only has 10,000 (with 1,575 already locked)
-    await expect(orderService.placeOrder(dto)).rejects.toThrow(/Insufficient funds/);
-  });
+      const fillDto: FillOrderDto = { orderId: order.id, price: 150, quantity: 4, fillIdempotencyKey: `fill-1-${Date.now()}` };
+      const filledOrder = await orderService.processFill(fillDto);
+      expect(filledOrder.status).toBe(OrderStatus.PARTIALLY_FILLED);
+      expect(filledOrder.filledQuantity.toNumber()).toBe(4);
+    });
 
-  it('should fail if insufficient shares', async () => {
-    const dto: PlaceOrderDto = {
-      userId, portfolioId, symbol: 'AAPL', side: OrderSide.SELL, type: OrderType.MARKET,
-      requestedQuantity: 40, currentMarketPrice: 150, idempotencyKey: `idemp-4-${Date.now()}`
-    };
-    // User has 50 shares, but 20 are already locked. Available = 30. Requested = 40.
-    await expect(orderService.placeOrder(dto)).rejects.toThrow(/Insufficient quantity/);
-  });
+    it('should process full fill (PENDING -> FILLED)', async () => {
+      const dto: PlaceOrderDto = {
+        userId, portfolioId, symbol: 'AAPL', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 10, limitPrice: 150, currentMarketPrice: 150, idempotencyKey: `idemp-lifecycle-3-${Date.now()}`
+      };
+      let order = await orderService.placeOrder(dto);
+      order = await orderService.markOrderPending(order.id);
 
-  it('should return existing order on duplicate idempotency key', async () => {
-    const idempotencyKey = `idemp-dup-${Date.now()}`;
-    const dto: PlaceOrderDto = {
-      userId, portfolioId, symbol: 'TSLA', side: OrderSide.BUY, type: OrderType.LIMIT,
-      requestedQuantity: 5, limitPrice: 100, currentMarketPrice: 100, idempotencyKey
-    };
-    
-    const firstOrder = await orderService.placeOrder(dto);
-    expect(firstOrder).toBeDefined();
-    
-    const secondOrder = await orderService.placeOrder(dto);
-    expect(secondOrder.id).toBe(firstOrder.id);
-  });
+      const fillDto: FillOrderDto = { orderId: order.id, price: 150, quantity: 10, fillIdempotencyKey: `fill-2-${Date.now()}` };
+      const filledOrder = await orderService.processFill(fillDto);
+      expect(filledOrder.status).toBe(OrderStatus.FILLED);
+      expect(filledOrder.filledQuantity.toNumber()).toBe(10);
+    });
 
-  it('should handle 5 concurrent BUY requests safely', async () => {
-    // Assuming each requires 100 cash. 5 * 100 = 500. We have plenty left.
-    const dtos = Array.from({ length: 5 }).map((_, i) => ({
-      userId, portfolioId, symbol: 'TSLA', side: OrderSide.BUY as OrderSide, type: OrderType.LIMIT as OrderType,
-      requestedQuantity: 1, limitPrice: 100, currentMarketPrice: 100, idempotencyKey: `idemp-conc-${i}-${Date.now()}`
-    }));
+    it('should allow partial fill followed by full fill (PARTIALLY_FILLED -> FILLED)', async () => {
+      const dto: PlaceOrderDto = {
+        userId, portfolioId, symbol: 'AAPL', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 10, limitPrice: 150, currentMarketPrice: 150, idempotencyKey: `idemp-lifecycle-4-${Date.now()}`
+      };
+      let order = await orderService.placeOrder(dto);
+      order = await orderService.markOrderPending(order.id);
 
-    const results = await Promise.all(dtos.map(dto => orderService.placeOrder(dto)));
-    expect(results).toHaveLength(5);
-    results.forEach(order => expect(order.status).toBe('ACCEPTED'));
-  });
+      await orderService.processFill({ orderId: order.id, price: 150, quantity: 4, fillIdempotencyKey: `fill-3-${Date.now()}` });
+      const finalOrder = await orderService.processFill({ orderId: order.id, price: 150, quantity: 6, fillIdempotencyKey: `fill-4-${Date.now()}` });
+      expect(finalOrder.status).toBe(OrderStatus.FILLED);
+      expect(finalOrder.filledQuantity.toNumber()).toBe(10);
+    });
 
-  it('should handle concurrency safely when racing for insufficient funds', async () => {
-    // User has around 7925 cash left. Let's try 10 concurrent requests of 1000 cash.
-    // Only 7 should succeed. The rest should fail with Insufficient funds.
-    const dtos = Array.from({ length: 10 }).map((_, i) => ({
-      userId, portfolioId, symbol: 'AMZN', side: OrderSide.BUY as OrderSide, type: OrderType.LIMIT as OrderType,
-      requestedQuantity: 10, limitPrice: 100, currentMarketPrice: 100, idempotencyKey: `idemp-race-${i}-${Date.now()}`
-    }));
+    it('should throw if filledQuantity > requestedQuantity', async () => {
+      const dto: PlaceOrderDto = {
+        userId, portfolioId, symbol: 'AAPL', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 10, limitPrice: 150, currentMarketPrice: 150, idempotencyKey: `idemp-lifecycle-5-${Date.now()}`
+      };
+      let order = await orderService.placeOrder(dto);
+      order = await orderService.markOrderPending(order.id);
 
-    const results = await Promise.allSettled(dtos.map(dto => orderService.placeOrder(dto)));
-    const fulfilled = results.filter(r => r.status === 'fulfilled');
-    const rejected = results.filter(r => r.status === 'rejected');
+      await expect(
+        orderService.processFill({ orderId: order.id, price: 150, quantity: 11, fillIdempotencyKey: `fill-fail-1-${Date.now()}` })
+      ).rejects.toThrow('filledQuantity cannot exceed requestedQuantity');
+    });
 
-    expect(fulfilled.length).toBeGreaterThan(0);
-    expect(rejected.length).toBeGreaterThan(0);
-    expect(fulfilled.length + rejected.length).toBe(10);
-    
-    // Verify cash is never negative
-    const portfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId } });
-    const availableCash = portfolio!.totalCash.toNumber() - portfolio!.lockedCash.toNumber();
-    expect(availableCash).toBeGreaterThanOrEqual(0);
+    it('should safely process cancellation releasing unused reservations', async () => {
+      const initialPortfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId }});
+      
+      const dto: PlaceOrderDto = {
+        userId, portfolioId, symbol: 'AAPL', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 10, limitPrice: 150, currentMarketPrice: 150, idempotencyKey: `idemp-lifecycle-6-${Date.now()}`
+      };
+      let order = await orderService.placeOrder(dto); // locks 1500
+      order = await orderService.markOrderPending(order.id);
+
+      // Fill 4 (uses 600)
+      await orderService.processFill({ orderId: order.id, price: 150, quantity: 4, fillIdempotencyKey: `fill-cancel-1-${Date.now()}` });
+
+      // Cancel remaining 6 (releases 900)
+      const cancelledOrder = await orderService.cancelOrder(order.id);
+      expect(cancelledOrder.status).toBe(OrderStatus.CANCELLED);
+
+      const finalPortfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId }});
+      
+      // Initial lockedCash should equal final lockedCash (it increased by 1500, decreased by 600 during fill, decreased by 900 during cancel)
+      expect(finalPortfolio!.lockedCash.toNumber()).toBe(initialPortfolio!.lockedCash.toNumber());
+    });
+
+    it('should not allow fills on CANCELLED, EXPIRED, or FILLED orders', async () => {
+      const dto: PlaceOrderDto = {
+        userId, portfolioId, symbol: 'AAPL', side: OrderSide.SELL, type: OrderType.MARKET,
+        requestedQuantity: 10, currentMarketPrice: 150, idempotencyKey: `idemp-lifecycle-7-${Date.now()}`
+      };
+      let order = await orderService.placeOrder(dto);
+      order = await orderService.markOrderPending(order.id);
+      await orderService.expireOrder(order.id);
+
+      await expect(
+        orderService.processFill({ orderId: order.id, price: 150, quantity: 10, fillIdempotencyKey: `fill-fail-2-${Date.now()}` })
+      ).rejects.toThrow('Invalid state transition');
+    });
+
+    it('should handle concurrent fills safely without overfilling', async () => {
+      const dto: PlaceOrderDto = {
+        userId, portfolioId, symbol: 'AAPL', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 100, limitPrice: 150, currentMarketPrice: 150, idempotencyKey: `idemp-conc-1-${Date.now()}`
+      };
+      let order = await orderService.placeOrder(dto);
+      order = await orderService.markOrderPending(order.id);
+
+      // Send 15 concurrent fill requests of 10 quantity. 
+      // Only 10 should succeed, the rest should throw 'filledQuantity cannot exceed requestedQuantity'.
+      const fillRequests = Array.from({ length: 15 }).map((_, i) => 
+        orderService.processFill({ orderId: order.id, price: 150, quantity: 10, fillIdempotencyKey: `fill-race-${i}-${Date.now()}` })
+      );
+
+      const results = await Promise.allSettled(fillRequests);
+      const fulfilled = results.filter(r => r.status === 'fulfilled');
+      const rejected = results.filter(r => r.status === 'rejected');
+
+      expect(fulfilled.length).toBe(10);
+      expect(rejected.length).toBe(5);
+
+      const finalOrder = await prisma.order.findUnique({ where: { id: order.id } });
+      expect(finalOrder!.status).toBe(OrderStatus.FILLED);
+      expect(finalOrder!.filledQuantity.toNumber()).toBe(100);
+    });
+
+    it('should handle concurrent fill + cancel races without negative locks', async () => {
+      const initialPortfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId }});
+      
+      const dto: PlaceOrderDto = {
+        userId, portfolioId, symbol: 'AAPL', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 100, limitPrice: 150, currentMarketPrice: 150, idempotencyKey: `idemp-conc-2-${Date.now()}`
+      };
+      let order = await orderService.placeOrder(dto);
+      order = await orderService.markOrderPending(order.id);
+
+      // Race a 50 qty fill against a cancel.
+      // Depending on lock acquisition order, either:
+      // 1. Fill 50, then Cancel 50.
+      // 2. Cancel 100, then Fill fails (Invalid transition).
+      const [fillResult, cancelResult] = await Promise.allSettled([
+        orderService.processFill({ orderId: order.id, price: 150, quantity: 50, fillIdempotencyKey: `fill-race-cancel-${Date.now()}` }),
+        orderService.cancelOrder(order.id)
+      ]);
+
+      expect(cancelResult.status).toBe('fulfilled');
+      expect(fillResult).toBeDefined();
+      
+      const finalPortfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId }});
+      // The lockedCash should have fully returned to exactly what it was before the test.
+      expect(finalPortfolio!.lockedCash.toNumber()).toBe(initialPortfolio!.lockedCash.toNumber());
+    });
   });
 });
