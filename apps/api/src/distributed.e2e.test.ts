@@ -61,23 +61,23 @@ beforeAll(async () => {
   // Actually, we can just call /api/auth/login since API is up.
   
   // Let's spawn the processes.
-  apiProcess = spawn('npx', ['ts-node', 'src/main.api.ts'], {
+  apiProcess = spawn(process.execPath, ['-r', 'ts-node/register', 'src/main.api.ts'], {
     env: { ...process.env, NODE_ENV: 'development', PORT: API_PORT.toString(), DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret' },
     cwd: process.cwd(),
     stdio: 'inherit'
   });
 
-  engineProcess = spawn('npx', ['ts-node', 'src/main.engine.ts'], {
+  engineProcess = spawn(process.execPath, ['-r', 'ts-node/register', 'src/main.engine.ts'], {
     env: { ...process.env, NODE_ENV: 'development', SYMBOLS_HANDLED: 'AAPL,TSLA', DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret' },
     cwd: process.cwd()
   });
 
-  workersProcess = spawn('npx', ['ts-node', 'src/main.workers.ts'], {
+  workersProcess = spawn(process.execPath, ['-r', 'ts-node/register', 'src/main.workers.ts'], {
     env: { ...process.env, NODE_ENV: 'development', DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret' },
     cwd: process.cwd()
   });
 
-  feedProcess = spawn('npx', ['ts-node', 'src/main.feed.ts'], {
+  feedProcess = spawn(process.execPath, ['-r', 'ts-node/register', 'src/main.feed.ts'], {
     env: { ...process.env, NODE_ENV: 'development', DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret' },
     cwd: process.cwd()
   });
