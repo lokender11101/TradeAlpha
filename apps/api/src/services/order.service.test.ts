@@ -274,4 +274,95 @@ describe('OrderService - State Machine & Concurrency (Phase 2.3)', () => {
       expect(secBalance).toBe(0);
     });
   });
+
+  describe('Cancellation Concurrency (Phase 5.1)', () => {
+    it('should successfully cancel a PENDING order and refund locked cash', async () => {
+      const order = await orderService.placeOrder({
+        userId, portfolioId, symbol: 'TSLA', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 10, limitPrice: 200, currentMarketPrice: 200, idempotencyKey: `cancel-test-${Date.now()}`
+      });
+      await prisma.order.update({ where: { id: order.id }, data: { status: OrderStatus.PENDING } });
+      
+      const portfolioBefore = await prisma.portfolio.findUniqueOrThrow({ where: { id: portfolioId } });
+      const cancelledOrder = await orderService.cancelOrder(order.id);
+      const portfolioAfter = await prisma.portfolio.findUniqueOrThrow({ where: { id: portfolioId } });
+
+      expect(cancelledOrder.status).toBe(OrderStatus.CANCELLED);
+      // Released 10 * 200 = 2000 locked cash
+      expect(Number(portfolioAfter.lockedCash)).toBe(Number(portfolioBefore.lockedCash) - 2000);
+    });
+
+    it('should successfully cancel a PARTIALLY_FILLED order and refund remaining locked cash', async () => {
+      const order = await orderService.placeOrder({
+        userId, portfolioId, symbol: 'NVDA', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 10, limitPrice: 100, currentMarketPrice: 100, idempotencyKey: `partial-cancel-${Date.now()}`
+      });
+      await prisma.order.update({ where: { id: order.id }, data: { status: OrderStatus.PARTIALLY_FILLED, filledQuantity: 4 } });
+
+      const portfolioBefore = await prisma.portfolio.findUniqueOrThrow({ where: { id: portfolioId } });
+      const cancelledOrder = await orderService.cancelOrder(order.id);
+      const portfolioAfter = await prisma.portfolio.findUniqueOrThrow({ where: { id: portfolioId } });
+
+      expect(cancelledOrder.status).toBe(OrderStatus.CANCELLED);
+      // Released 6 * 100 = 600 locked cash
+      expect(Number(portfolioAfter.lockedCash)).toBe(Number(portfolioBefore.lockedCash) - 600);
+    });
+
+    it('should reject cancellation of a terminal order (FILLED)', async () => {
+      const order = await orderService.placeOrder({
+        userId, portfolioId, symbol: 'MSFT', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 5, limitPrice: 100, currentMarketPrice: 100, idempotencyKey: `terminal-test-${Date.now()}`
+      });
+      await prisma.order.update({ where: { id: order.id }, data: { status: OrderStatus.FILLED, filledQuantity: 5 } });
+
+      await expect(orderService.cancelOrder(order.id)).rejects.toThrow(/Invalid state transition/);
+    });
+
+    it('should resolve Cancel vs EXECUTE_FILL race correctly', async () => {
+      const order = await orderService.placeOrder({
+        userId, portfolioId, symbol: 'META', side: OrderSide.BUY, type: OrderType.LIMIT,
+        requestedQuantity: 10, limitPrice: 150, currentMarketPrice: 150, idempotencyKey: `race-test-${Date.now()}`
+      });
+      await prisma.order.update({ where: { id: order.id }, data: { status: OrderStatus.PENDING } });
+      
+      const portfolioBefore = await prisma.portfolio.findUniqueOrThrow({ where: { id: portfolioId } });
+
+      // Simulate a concurrent fill and cancel
+      const fillPromise = orderService.processFill({
+        orderId: order.id,
+        price: 150,
+        quantity: 10,
+        fillIdempotencyKey: `exec-${order.id}-10`
+      });
+
+      // Give the fill a tiny head start to acquire lock, then try to cancel
+      const cancelPromise = new Promise((resolve) => setTimeout(resolve, 5)).then(() => orderService.cancelOrder(order.id).catch(e => e));
+
+      const [fillResult, cancelResult] = await Promise.all([fillPromise, cancelPromise]);
+
+      const finalOrder = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+      const portfolioAfter = await prisma.portfolio.findUniqueOrThrow({ where: { id: portfolioId } });
+
+      // Either fill won, or cancel won. Both must not succeed in a way that breaks invariants.
+      // Since it's a full fill, if fill won, status is FILLED. The cancel would throw "Invalid state transition".
+      if (finalOrder.status === OrderStatus.FILLED) {
+        expect(cancelResult).toBeInstanceOf(Error);
+        expect((cancelResult as Error).message).toMatch(/Invalid state transition/);
+        // Cash should have been spent (deducted from both total and locked)
+        expect(Number(portfolioAfter.totalCash)).toBe(Number(portfolioBefore.totalCash) - 1500);
+        expect(Number(portfolioAfter.lockedCash)).toBe(Number(portfolioBefore.lockedCash) - 1500);
+      } else if (finalOrder.status === OrderStatus.CANCELLED) {
+        // This path is extremely unlikely in this specific test timing, but handled for correctness.
+        expect(fillResult).toBeInstanceOf(Error);
+        // Locked cash should just be released (totalCash remains same, lockedCash reduces)
+        expect(Number(portfolioAfter.totalCash)).toBe(Number(portfolioBefore.totalCash));
+        expect(Number(portfolioAfter.lockedCash)).toBe(Number(portfolioBefore.lockedCash) - 1500);
+      } else {
+        throw new Error(`Unexpected final order status: ${finalOrder.status}`);
+      }
+      
+      // Ensure invariants hold (no negative locked cash)
+      expect(Number(portfolioAfter.lockedCash)).toBeGreaterThanOrEqual(0);
+    });
+  });
 });

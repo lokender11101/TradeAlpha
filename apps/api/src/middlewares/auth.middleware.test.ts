@@ -9,7 +9,8 @@ describe('Auth Middleware', () => {
 
   beforeEach(() => {
     mockReq = {
-      headers: {}
+      headers: {},
+      cookies: {}
     };
     mockRes = {
       status: jest.fn().mockReturnThis(),

@@ -1,3 +1,4 @@
+import { createEnvelope } from '../utils/envelope';
 import { Prisma, PrismaClient, OrderSide, OrderType, OrderStatus, Order } from '@prisma/client';
 import { LedgerService } from './ledger.service';
 import { PositionService } from './position.service';
@@ -111,7 +112,7 @@ export class OrderService {
             type: 'ORDER_ACCEPTED', 
             aggregateType: 'Order', 
             aggregateId: order.id, 
-            payload: { orderId: order.id, userId: order.userId, portfolioId: order.portfolioId } 
+            payload: createEnvelope('ORDER_ACCEPTED', { orderId: order.id, userId: order.userId, portfolioId: order.portfolioId }) 
           }
         });
 
@@ -147,7 +148,7 @@ export class OrderService {
           type: 'ORDER_PENDING', 
           aggregateType: 'Order',
           aggregateId: updatedOrder.id,
-          payload: { orderId: updatedOrder.id, portfolioId: updatedOrder.portfolioId } 
+          payload: createEnvelope('ORDER_PENDING', { orderId: updatedOrder.id, portfolioId: updatedOrder.portfolioId }) 
         }
       });
 
@@ -179,7 +180,7 @@ export class OrderService {
           type: 'ORDER_ACTIVATED', 
           aggregateType: 'Order',
           aggregateId: updatedOrder.id,
-          payload: { orderId: updatedOrder.id, type: updatedOrder.type, portfolioId: updatedOrder.portfolioId } 
+          payload: createEnvelope('ORDER_ACTIVATED', { orderId: updatedOrder.id, type: updatedOrder.type, portfolioId: updatedOrder.portfolioId }) 
         }
       });
 
@@ -306,7 +307,7 @@ export class OrderService {
             type: 'ORDER_FILLED', 
             aggregateType: 'Order',
             aggregateId: order.id,
-            payload: { orderId: order.id, fillIdempotencyKey: dto.fillIdempotencyKey, portfolioId: order.portfolioId } 
+            payload: createEnvelope('ORDER_FILLED', { orderId: order.id, fillIdempotencyKey: dto.fillIdempotencyKey, portfolioId: order.portfolioId }) 
           }
         });
 
@@ -370,7 +371,7 @@ export class OrderService {
           type: 'ORDER_CANCELLED', 
           aggregateType: 'Order',
           aggregateId: order.id,
-          payload: { orderId: order.id, portfolioId: order.portfolioId } 
+          payload: createEnvelope('ORDER_CANCELLED', { orderId: order.id, portfolioId: order.portfolioId }) 
         }
       });
 
@@ -424,7 +425,7 @@ export class OrderService {
           type: 'ORDER_EXPIRED', 
           aggregateType: 'Order',
           aggregateId: order.id,
-          payload: { orderId: order.id, portfolioId: order.portfolioId } 
+          payload: createEnvelope('ORDER_EXPIRED', { orderId: order.id, portfolioId: order.portfolioId }) 
         }
       });
 

@@ -5,8 +5,14 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "nodemon src/index.ts",
+    "start:api": "node dist/main.api.js",
+    "start:engine": "node dist/main.engine.js",
+    "start:workers": "node dist/main.workers.js",
+    "start:feed": "node dist/main.feed.js",
+    "dev:api": "nodemon src/main.api.ts",
+    "dev:engine": "nodemon src/main.engine.ts",
+    "dev:workers": "nodemon src/main.workers.ts",
+    "dev:feed": "nodemon src/main.feed.ts",
     "test": "jest --runInBand",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit"
@@ -21,6 +27,7 @@
     "@socket.io/redis-emitter": "^5.1.0",
     "bcrypt": "^6.0.0",
     "bullmq": "^6.1.0",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
@@ -34,6 +41,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/bcrypt": "^6.0.0",
+    "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",

@@ -40,4 +40,89 @@ export class OrderController {
       }
     }
   }
+  static async getOrders(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+      const skip = (page - 1) * limit;
+
+      const where: any = { userId };
+
+      if (req.query.status) where.status = req.query.status;
+      if (req.query.symbol) where.symbol = req.query.symbol;
+      if (req.query.side) where.side = req.query.side;
+      if (req.query.type) where.type = req.query.type;
+      
+      if (req.query.from || req.query.to) {
+        where.createdAt = {};
+        if (req.query.from) where.createdAt.gte = new Date(req.query.from as string);
+        if (req.query.to) where.createdAt.lte = new Date(req.query.to as string);
+      }
+
+      const [totalRecords, orders] = await Promise.all([
+        prisma.order.count({ where }),
+        prisma.order.findMany({
+          where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip,
+          take: limit,
+        }),
+      ]);
+
+      const totalPages = Math.ceil(totalRecords / limit);
+
+      res.status(200).json({
+        data: orders,
+        meta: {
+          totalRecords,
+          totalPages,
+          currentPage: page,
+          pageSize: limit,
+        }
+      });
+    } catch (error) {
+      console.error('getOrders 500 error:', error);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+
+  static async cancelOrder(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.id;
+      const orderId = req.params.id as string;
+
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      // Authorization check
+      const order = await prisma.order.findUnique({ where: { id: orderId } });
+      if (!order) {
+        res.status(404).json({ error: 'Order not found' });
+        return;
+      }
+
+      if (order.userId !== userId) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+
+      const cancelledOrder = await orderService.cancelOrder(orderId);
+      res.status(200).json(cancelledOrder);
+    } catch (error: any) {
+      if (error.message && (error.message.includes('Invalid state transition') || error.message.includes('No Order found'))) {
+        res.status(400).json({ error: error.message });
+      } else {
+        console.error('cancelOrder 500 error:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+      }
+    }
+  }
 }

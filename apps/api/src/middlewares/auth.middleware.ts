@@ -11,16 +11,17 @@ export interface AuthenticatedRequest extends Request {
 }
 
 export const authenticateJWT = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
-  const authHeader = req.headers.authorization;
+  let token = req.cookies?.token;
 
-  if (authHeader) {
-    const token = authHeader.split(' ')[1];
-
+  if (!token && req.headers.authorization) {
+    token = req.headers.authorization.split(' ')[1];
     if (!token) {
       res.status(401).json({ error: 'Unauthorized: Malformed token' });
       return;
     }
+  }
 
+  if (token) {
     const secret = process.env.JWT_SECRET || 'fallback-secret-for-tests';
 
     jwt.verify(token, secret, (err: any, decoded: any) => {

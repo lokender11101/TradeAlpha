@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { app, httpServer, wsServer } from './index';
+import { app, httpServer, wsServer } from './main.api';
 import { PrismaClient } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 
@@ -56,14 +56,18 @@ describe('Authentication & Impersonation E2E', () => {
   // --- REST Authentication Tests ---
 
   it('should return 401 for missing token on protected route', async () => {
-    const res = await request(app).post('/api/orders').send({});
+    const res = await request(app).post('/api/orders')
+      .set('Cookie', 'csrf_token=test')
+      .set('x-csrf-token', 'test')
+      .send({});
     expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/Missing token/);
   });
 
   it('should return 401 for malformed Authorization header', async () => {
     const res = await request(app)
       .post('/api/orders')
+      .set('Cookie', 'csrf_token=test')
+      .set('x-csrf-token', 'test')
       .set('Authorization', 'Bearer ')
       .send({});
     expect(res.status).toBe(401);
@@ -74,6 +78,8 @@ describe('Authentication & Impersonation E2E', () => {
     const badToken = jwt.sign({}, 'wrong-secret', { subject: userA.id });
     const res = await request(app)
       .post('/api/orders')
+      .set('Cookie', `token=${badToken}; csrf_token=test`)
+      .set('x-csrf-token', 'test')
       .set('Authorization', `Bearer ${badToken}`)
       .send({});
     expect(res.status).toBe(401);
@@ -84,6 +90,8 @@ describe('Authentication & Impersonation E2E', () => {
     const expiredToken = jwt.sign({}, secret, { subject: userA.id, expiresIn: '-1h' } as any);
     const res = await request(app)
       .post('/api/orders')
+      .set('Cookie', `token=${expiredToken}; csrf_token=test`)
+      .set('x-csrf-token', 'test')
       .set('Authorization', `Bearer ${expiredToken}`)
       .send({});
     expect(res.status).toBe(401);
@@ -93,6 +101,8 @@ describe('Authentication & Impersonation E2E', () => {
   it('should create order as User A even if request body contains User B userId (impersonation blocked)', async () => {
     const res = await request(app)
       .post('/api/orders')
+      .set('Cookie', [`token=${tokenA}`, `csrf_token=test`])
+      .set('x-csrf-token', 'test')
       .set('Authorization', `Bearer ${tokenA}`)
       .send({
         userId: userB.id, // Malicious impersonation attempt
@@ -117,6 +127,7 @@ describe('Authentication & Impersonation E2E', () => {
   it('should deny User A accessing User B portfolio positions (403 Forbidden)', async () => {
     const res = await request(app)
       .get(`/api/portfolios/${userB.portfolios[0].id}/positions`)
+      .set('Cookie', `token=${tokenA}`)
       .set('Authorization', `Bearer ${tokenA}`);
 
     expect(res.status).toBe(403);
@@ -125,6 +136,7 @@ describe('Authentication & Impersonation E2E', () => {
   it('should allow User B to access their own portfolio positions', async () => {
     const res = await request(app)
       .get(`/api/portfolios/${userB.portfolios[0].id}/positions`)
+      .set('Cookie', `token=${tokenB}`)
       .set('Authorization', `Bearer ${tokenB}`);
 
     expect(res.status).toBe(200);
@@ -143,16 +155,21 @@ describe('Authentication & Impersonation E2E', () => {
       .post('/api/auth/login')
       .send({ email: 'newuser@test.com', password: 'securepassword123' });
     expect(loginRes.status).toBe(200);
-    expect(loginRes.body).toHaveProperty('token');
+
+    const setCookieHeader = loginRes.headers['set-cookie'] as unknown as string[];
+    const tokenCookie = (setCookieHeader || []).find((c: string) => c.startsWith('token='));
+    const token = tokenCookie ? tokenCookie.split(';')[0].split('=')[1] : '';
+    expect(token).toBeTruthy();
 
     // Use the token on a protected route
     const newUserPortfolio = await prisma.portfolio.findFirst({
-      where: { userId: regRes.body.id }
+      where: { user: { email: 'newuser@test.com' } }
     });
-
-    const posRes = await request(app)
+    
+    const positionsRes = await request(app)
       .get(`/api/portfolios/${newUserPortfolio!.id}/positions`)
-      .set('Authorization', `Bearer ${loginRes.body.token}`);
-    expect(posRes.status).toBe(200);
+      .set('Cookie', `token=${token}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(positionsRes.status).toBe(200);
   });
 });

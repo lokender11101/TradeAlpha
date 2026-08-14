@@ -16,6 +16,7 @@ export interface ExecuteFillJob {
   price: string;
   quantity: string;
   executionIdempotencyKey: string;
+  correlationId?: string;
 }
 
 export class ExecutionWorker {
@@ -54,8 +55,8 @@ export class ExecutionWorker {
   }
 
   private async processJob(job: Job<ExecuteFillJob>): Promise<void> {
-    const { orderId, price, quantity, executionIdempotencyKey } = job.data;
-    logger.info({ orderId, price, quantity, executionIdempotencyKey }, 'Processing EXECUTE_FILL job');
+    const { orderId, price, quantity, executionIdempotencyKey, correlationId } = job.data;
+    logger.info({ orderId, price, quantity, executionIdempotencyKey, correlationId: correlationId || 'system' }, 'Processing EXECUTE_FILL job');
 
     // Delegate to OrderService which handles the strictly idempotent transaction
     await this.orderService.processFill({

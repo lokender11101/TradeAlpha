@@ -9,6 +9,28 @@ const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', { max
 const priceCache = new PriceCacheService(redis);
 
 export class PortfolioController {
+  static async getPortfolio(req: AuthenticatedRequest, res: Response) {
+    try {
+      const portfolioId = req.params.portfolioId as string;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      
+      const portfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId } });
+      if (!portfolio) {
+        return res.status(404).json({ error: 'Portfolio not found' });
+      }
+      if (portfolio.userId !== userId) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      
+      res.status(200).json(portfolio);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+
   static async getPositions(req: AuthenticatedRequest, res: Response) {
     try {
       const portfolioId = req.params.portfolioId as string;

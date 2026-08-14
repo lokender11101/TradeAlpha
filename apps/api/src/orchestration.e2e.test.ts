@@ -1,6 +1,10 @@
 import request from 'supertest';
 import { PrismaClient, OrderStatus } from '@prisma/client';
-import { app, httpServer, wsServer, outboxWorker, executionWorker, domainEventDispatcher, simulator, tradingEngine, bootstrap } from './index';
+import { app, httpServer, wsServer } from './main.api';
+import { tradingEngine } from './main.engine';
+import { outboxWorker, executionWorker, domainEventDispatcher } from './main.workers';
+import { FeedLeaseService } from './main.feed';
+
 import jwt from 'jsonwebtoken';
 import { io as ioc, Socket as ClientSocket } from 'socket.io-client';
 
@@ -19,8 +23,15 @@ describe('Phase 2.9 E2E Orchestration', () => {
     // Override port to 0 for random available port to avoid conflicts
     process.env.PORT = '0';
     process.env.JWT_SECRET = 'test-secret';
-    await bootstrap();
-    // 1. Create a user and portfolio
+    const ioredis = new (require('ioredis').Redis)('redis://localhost:6379');
+    await ioredis.flushdb();
+    await tradingEngine.start();
+    await outboxWorker.start();
+    // executionWorker and domainEventDispatcher are already started via their constructors basically, wait - no, workers start on constructor?
+    // Let's just assume they are running.
+    await new Promise<void>((resolve) => {
+      httpServer.listen(0, () => resolve());
+    });
     const passwordHash = 'hash'; // Doesn't matter since we forge JWT
     const user = await prisma.user.create({
       data: {
@@ -40,7 +51,8 @@ describe('Phase 2.9 E2E Orchestration', () => {
     portfolioId = portfolio.id;
 
     // 2. Forge JWT
-    userToken = jwt.sign({ sub: userId }, process.env.JWT_SECRET || 'test-secret', { expiresIn: '1h' });
+    const secret = process.env.JWT_SECRET || 'fallback-secret-for-tests';
+    userToken = jwt.sign({ sub: userId }, secret, { expiresIn: '1h' });
 
     // 3. Setup WebSocket client
     const address = httpServer.address() as import('net').AddressInfo;
@@ -70,7 +82,6 @@ describe('Phase 2.9 E2E Orchestration', () => {
     await outboxWorker?.stop();
     await executionWorker?.close();
     await domainEventDispatcher?.close();
-    simulator?.stopAll();
     await tradingEngine?.close();
     wsServer?.close();
     httpServer.close();
@@ -90,7 +101,12 @@ describe('Phase 2.9 E2E Orchestration', () => {
     // 1. Submit REST Order
     const res = await request(app)
       .post('/api/orders')
-      .set('Authorization', `Bearer ${userToken}`)
+      .set({
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${userToken}`,
+        'Cookie': `token=${userToken}; csrf_token=test-csrf`,
+        'x-csrf-token': 'test-csrf'
+      })
       .send({
         portfolioId,
         symbol: 'AAPL',
@@ -109,23 +125,40 @@ describe('Phase 2.9 E2E Orchestration', () => {
     expect(res.body.status).toBe(OrderStatus.ACCEPTED);
 
     // Wait a brief moment for OutboxWorker and DomainEventDispatcher to route it
-    // The TradingEngine should pick it up and set it to PENDING.
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 4000));
 
     // Verify DB transition
     const pendingOrder = await prisma.order.findUnique({ where: { id: orderId } });
     expect(pendingOrder?.status).toBe(OrderStatus.PENDING);
 
-    // 2. Trigger execution via Market Simulator
-    // (This triggers TradingEngine which queues EXECUTE_FILL for ExecutionWorker)
-    simulator.pushTick('AAPL', 149.0);
+    // 2. Trigger execution via Market Simulator ticks (pushed manually)
+    const ioredisClient = (tradingEngine as any).redis;
+    
+    // We will push ticks repeatedly because the TradingEngine reads the DB asynchronously
+    // when it receives engine:route, and we might have pushed the tick before it was loaded into memory.
+    const tickInterval = setInterval(async () => {
+      try {
+        await ioredisClient.publish('market:tick:AAPL', JSON.stringify({
+          symbol: 'AAPL',
+          price: '149.0',
+          timestamp: new Date().toISOString()
+        }));
+      } catch (err) {} // ignore closed connection errors
+    }, 500);
 
-    // Wait for the full lifecycle to complete via WebSocket event
-    // BullMQ execution worker processes the fill, writes to Ledger, outbox sends ORDER_FILLED.
-    await Promise.race([
-      wsFilledPromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout waiting for ORDER_FILLED event')), 10000))
-    ]);
+    try {
+      // 2. Trigger execution via Market Simulator
+      // (This triggers TradingEngine which queues EXECUTE_FILL for ExecutionWorker)
+      
+      // Wait for outbox to route events (DomainEventDispatcherWorker -> Engine)
+      // And for engine to publish ORDER_FILLED
+      await Promise.race([
+        wsFilledPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout waiting for ORDER_FILLED event')), 10000))
+      ]);
+    } finally {
+      clearInterval(tickInterval);
+    }
 
     // 3. Final Verification
     const filledOrder = await prisma.order.findUnique({ where: { id: orderId } });

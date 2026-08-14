@@ -25,29 +25,26 @@ jest.mock('@socket.io/redis-emitter', () => {
 
 describe('DomainEventDispatcherWorker', () => {
   let worker: DomainEventDispatcherWorker;
-  let mockEngine: any;
   let mockOrderService: any;
+  let mockRedis: any;
 
   beforeEach(() => {
     mockEmit.mockClear();
-    
-    mockEngine = {
-      addOrder: jest.fn(),
-      removeOrder: jest.fn()
-    };
 
     mockOrderService = {
       markOrderPending: jest.fn().mockResolvedValue({ id: 'order-1', symbol: 'AAPL' })
     };
 
-    worker = new DomainEventDispatcherWorker('redis://localhost:6379', mockEngine, mockOrderService);
+    worker = new DomainEventDispatcherWorker('redis://localhost:6379', mockOrderService);
+    mockRedis = (worker as any).redis;
+    mockRedis.publish = jest.fn();
   });
 
   afterEach(async () => {
     await worker.close();
   });
 
-  it('should process ORDER_ACCEPTED by routing to PENDING and Engine, then broadcasting', async () => {
+  it('should process ORDER_ACCEPTED by routing to PENDING and Redis, then broadcasting', async () => {
     const job = {
       id: 'job-1',
       data: {
@@ -63,7 +60,7 @@ describe('DomainEventDispatcherWorker', () => {
     await (worker as any).processJob(job);
 
     expect(mockOrderService.markOrderPending).toHaveBeenCalledWith('order-1');
-    expect(mockEngine.addOrder).toHaveBeenCalledWith(expect.objectContaining({ id: 'order-1' }));
+    expect(mockRedis.publish).toHaveBeenCalledWith('engine:route:AAPL', JSON.stringify({ orderId: 'order-1', symbol: 'AAPL', correlationId: 'system' }));
     expect(mockEmit).toHaveBeenCalledWith('ORDER_ACCEPTED', expect.objectContaining({ eventId: 'event-1' }));
   });
 
@@ -89,12 +86,12 @@ describe('DomainEventDispatcherWorker', () => {
     expect(mockEmit).toHaveBeenCalledWith('ORDER_ACCEPTED', expect.objectContaining({ eventId: 'event-1' }));
   });
 
-  it('should process terminal events by removing from Engine and broadcasting', async () => {
+  it('should process terminal events by publishing route to Redis and broadcasting', async () => {
     const terminalTypes = ['ORDER_FILLED', 'ORDER_REJECTED', 'ORDER_CANCELLED', 'ORDER_EXPIRED'];
 
     for (const type of terminalTypes) {
       mockEmit.mockClear();
-      mockEngine.removeOrder.mockClear();
+      mockRedis.publish.mockClear();
 
       const job = {
         id: `job-${type}`,
@@ -103,14 +100,15 @@ describe('DomainEventDispatcherWorker', () => {
           type,
           payload: {
             portfolioId: 'portfolio-1',
-            orderId: 'order-1'
+            orderId: 'order-1',
+            symbol: 'AAPL'
           }
         }
       } as unknown as Job;
 
       await (worker as any).processJob(job);
 
-      expect(mockEngine.removeOrder).toHaveBeenCalledWith('order-1');
+      expect(mockRedis.publish).toHaveBeenCalledWith('engine:route:AAPL', JSON.stringify({ orderId: 'order-1', symbol: 'AAPL' }));
       expect(mockEmit).toHaveBeenCalledWith(type, expect.objectContaining({ eventId: `event-${type}` }));
     }
   });

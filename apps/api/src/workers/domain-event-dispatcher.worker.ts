@@ -3,9 +3,7 @@ import { Emitter } from '@socket.io/redis-emitter';
 import Redis from 'ioredis';
 import pino from 'pino';
 import { EventEnvelope } from '../websocket';
-import { TradingEngine } from '../engine/trading-engine';
 import { OrderService } from '../services/order.service';
-
 const logger = pino({
   transport: {
     target: 'pino-pretty',
@@ -17,18 +15,15 @@ export class DomainEventDispatcherWorker {
   private readonly worker: Worker;
   private readonly redis: Redis;
   private readonly emitter: Emitter;
-  private readonly tradingEngine: TradingEngine;
   private readonly orderService: OrderService;
 
   constructor(
     redisUrl: string,
-    tradingEngine: TradingEngine,
     orderService: OrderService,
     queueName: string = 'tradealpha-domain-events'
   ) {
     this.redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
     this.emitter = new Emitter(this.redis);
-    this.tradingEngine = tradingEngine;
     this.orderService = orderService;
 
     this.worker = new Worker(queueName, async (job: Job) => {
@@ -54,14 +49,17 @@ export class DomainEventDispatcherWorker {
     }
 
     const typedPayload = payload as Record<string, unknown>;
-    const orderId = typedPayload.orderId as string | undefined;
+    const correlationId = typedPayload.correlationId as string || 'system';
+    const businessPayload = typedPayload.payload as Record<string, unknown> || typedPayload;
+    
+    const orderId = businessPayload.orderId as string | undefined;
 
     // 1. Specific routing logic
     if (type === 'ORDER_ACCEPTED' && orderId) {
       try {
         const order = await this.orderService.markOrderPending(orderId);
-        this.tradingEngine.addOrder(order);
-        logger.info({ orderId }, '[Dispatcher] Routed ORDER_ACCEPTED to PENDING and Engine');
+        await this.redis.publish(`engine:route:${order.symbol}`, JSON.stringify({ orderId: order.id, symbol: order.symbol, correlationId }));
+        logger.info({ orderId, symbol: order.symbol, correlationId }, '[Dispatcher] Routed ORDER_ACCEPTED to PENDING and published engine route');
       } catch (err: unknown) {
         if (err instanceof Error && err.message.includes('Invalid state transition')) {
           // Idempotent recovery: already pending or further along.
@@ -71,18 +69,21 @@ export class DomainEventDispatcherWorker {
         }
       }
     } else if (['ORDER_FILLED', 'ORDER_REJECTED', 'ORDER_CANCELLED', 'ORDER_EXPIRED'].includes(type) && orderId) {
-      this.tradingEngine.removeOrder(orderId);
+      const symbol = typedPayload.symbol as string | undefined;
+      if (symbol) {
+        await this.redis.publish(`engine:route:${symbol}`, JSON.stringify({ orderId, symbol }));
+      }
     }
 
     // 2. Broadcast to WebSockets
-    const portfolioId = typedPayload.portfolioId as string;
+    const portfolioId = businessPayload.portfolioId as string;
     
     if (portfolioId) {
       const envelope: EventEnvelope = {
         eventId,
         type,
         timestamp: new Date().toISOString(),
-        payload: typedPayload
+        payload: businessPayload
       };
 
       try {

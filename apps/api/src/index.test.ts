@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { app } from './index';
+import { app } from './main.api';
 
 describe('API Core', () => {
   it('should return 200 OK for /health', async () => {

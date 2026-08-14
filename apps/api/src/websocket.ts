@@ -50,7 +50,17 @@ export class WebSocketServer {
 
   private setupAuthentication() {
     this.io.use((socket, next) => {
-      const token = socket.handshake.auth?.token;
+      // First check auth payload for backward compatibility (e.g. tests)
+      let token = socket.handshake.auth?.token;
+      
+      // If not present, try to extract from cookies (for browser clients with HttpOnly cookie)
+      if (!token && socket.request.headers.cookie) {
+        const cookies = socket.request.headers.cookie.split(';').map(c => c.trim());
+        const tokenCookie = cookies.find(c => c.startsWith('token='));
+        if (tokenCookie) {
+          token = tokenCookie.split('=')[1];
+        }
+      }
       
       if (!token || typeof token !== 'string') {
         return next(new Error('Authentication Error: Missing token'));
