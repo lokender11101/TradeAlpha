@@ -31,9 +31,11 @@ export class OrderController {
         ) {
           res.status(400).json({ error: error.message });
         } else {
+          console.error('placeOrder 500 error:', error);
           res.status(500).json({ error: 'Internal Server Error' });
         }
       } else {
+        console.error('placeOrder unknown error:', error);
         res.status(500).json({ error: 'Internal Server Error' });
       }
     }

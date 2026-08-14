@@ -62,6 +62,7 @@ model Order {
   limitPrice        Decimal?    @db.Decimal(19, 4) @map("limit_price")
   stopPrice         Decimal?    @db.Decimal(19, 4) @map("stop_price")
   reservationPrice  Decimal?    @db.Decimal(19, 4) @map("reservation_price")
+  isActivated       Boolean     @default(false) @map("is_activated")
   status            OrderStatus @default(RECEIVED)
   idempotencyKey    String      @map("idempotency_key")
   createdAt         DateTime    @default(now()) @map("created_at")

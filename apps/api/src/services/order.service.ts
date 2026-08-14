@@ -111,7 +111,7 @@ export class OrderService {
             type: 'ORDER_ACCEPTED', 
             aggregateType: 'Order', 
             aggregateId: order.id, 
-            payload: { orderId: order.id, userId: order.userId } 
+            payload: { orderId: order.id, userId: order.userId, portfolioId: order.portfolioId } 
           }
         });
 
@@ -147,7 +147,39 @@ export class OrderService {
           type: 'ORDER_PENDING', 
           aggregateType: 'Order',
           aggregateId: updatedOrder.id,
-          payload: { orderId: updatedOrder.id } 
+          payload: { orderId: updatedOrder.id, portfolioId: updatedOrder.portfolioId } 
+        }
+      });
+
+      return updatedOrder;
+    });
+  }
+
+  public async activateStopLimit(orderId: string): Promise<Order> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT 1 FROM orders WHERE id = ${orderId} FOR UPDATE`;
+      const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
+      
+      if (order.status !== OrderStatus.PENDING) {
+        throw new Error(`Cannot activate STOP_LIMIT order ${orderId} in status ${order.status}`);
+      }
+
+      if (order.isActivated) {
+        return order; // Already activated, idempotent
+      }
+
+      const updatedOrder = await tx.order.update({
+        where: { id: orderId },
+        data: { isActivated: true }
+      });
+
+      // Emit domain event for observability (optional but good practice)
+      await tx.outboxEvent.create({
+        data: { 
+          type: 'ORDER_ACTIVATED', 
+          aggregateType: 'Order',
+          aggregateId: updatedOrder.id,
+          payload: { orderId: updatedOrder.id, type: updatedOrder.type, portfolioId: updatedOrder.portfolioId } 
         }
       });
 
@@ -274,7 +306,7 @@ export class OrderService {
             type: 'ORDER_FILLED', 
             aggregateType: 'Order',
             aggregateId: order.id,
-            payload: { orderId: order.id, fillIdempotencyKey: dto.fillIdempotencyKey } 
+            payload: { orderId: order.id, fillIdempotencyKey: dto.fillIdempotencyKey, portfolioId: order.portfolioId } 
           }
         });
 
@@ -338,7 +370,7 @@ export class OrderService {
           type: 'ORDER_CANCELLED', 
           aggregateType: 'Order',
           aggregateId: order.id,
-          payload: { orderId: order.id } 
+          payload: { orderId: order.id, portfolioId: order.portfolioId } 
         }
       });
 
@@ -392,7 +424,7 @@ export class OrderService {
           type: 'ORDER_EXPIRED', 
           aggregateType: 'Order',
           aggregateId: order.id,
-          payload: { orderId: order.id } 
+          payload: { orderId: order.id, portfolioId: order.portfolioId } 
         }
       });
 
