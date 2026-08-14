@@ -101,14 +101,40 @@ beforeAll(async () => {
   }
 });
 
-afterAll(async () => {
-  apiProcess?.kill();
-  engineProcess?.kill();
-  workersProcess?.kill();
-  feedProcess?.kill();
-  await prisma.$disconnect();
-  await redis.quit();
-});
+  afterAll(async () => {
+    const killAndWait = (proc?: any) => {
+      if (!proc) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        // If already exited, resolve immediately
+        if (proc.killed && proc.exitCode !== null) return resolve();
+        
+        let timeout: NodeJS.Timeout;
+        proc.once('exit', () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+        
+        // Failsafe timeout to prevent hanging tests
+        timeout = setTimeout(() => {
+          console.warn('Process did not exit gracefully, forcefully terminating.');
+          proc.kill('SIGKILL');
+          resolve();
+        }, 5000);
+
+        proc.kill('SIGTERM');
+      });
+    };
+
+    await Promise.all([
+      killAndWait(apiProcess),
+      killAndWait(engineProcess),
+      killAndWait(workersProcess),
+      killAndWait(feedProcess)
+    ]);
+    
+    await prisma.$disconnect();
+    await redis.quit();
+  });
 
 describe('Phase 4 Distributed E2E Test Suite', () => {
 
