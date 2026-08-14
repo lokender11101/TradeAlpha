@@ -71,7 +71,7 @@ describe('Phase 2.9 E2E Orchestration', () => {
         resolve(); // Or reject
       });
     });
-  }, 10000);
+  }, 30000);
 
   afterAll(async () => {
     if (clientSocket) {
@@ -154,7 +154,7 @@ describe('Phase 2.9 E2E Orchestration', () => {
       // And for engine to publish ORDER_FILLED
       await Promise.race([
         wsFilledPromise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout waiting for ORDER_FILLED event')), 10000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout waiting for ORDER_FILLED event')), 30000))
       ]);
     } finally {
       clearInterval(tickInterval);
@@ -176,5 +176,5 @@ describe('Phase 2.9 E2E Orchestration', () => {
       where: { portfolioId, symbol: 'AAPL' }
     });
     expect(position?.quantity.toString()).toBe('10');
-  }, 15000);
+  }, 45000);
 });

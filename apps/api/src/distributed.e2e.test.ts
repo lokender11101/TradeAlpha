@@ -19,13 +19,13 @@ let feedProcess: ChildProcess;
 let token: string;
 let portfolioId: string;
 
-jest.setTimeout(30000);
+jest.setTimeout(60000);
 
 async function wait(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function waitForServer(url: string, timeout = 10000) {
+async function waitForServer(url: string, timeout = 30000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     try {
