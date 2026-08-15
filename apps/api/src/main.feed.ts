@@ -102,7 +102,7 @@ class FeedLeaseService {
   }
 
   private startSimulations(): void {
-    const symbols = ['AAPL', 'MSFT', 'TSLA', 'GOOGL', 'AMZN'];
+    const symbols = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK'];
     symbols.forEach(symbol => {
       this.simulator.startSimulation({
         symbol,
@@ -115,7 +115,7 @@ class FeedLeaseService {
   }
 
   private stopSimulations(): void {
-    const symbols = ['AAPL', 'MSFT', 'TSLA', 'GOOGL', 'AMZN'];
+    const symbols = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK'];
     symbols.forEach(symbol => {
       this.simulator.stopSimulation(symbol);
     });

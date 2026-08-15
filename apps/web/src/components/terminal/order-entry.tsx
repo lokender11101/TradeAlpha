@@ -28,9 +28,12 @@ export function OrderEntry({ symbol }: { symbol: string }) {
         side,
         type,
         requestedQuantity: Number(quantity),
+        idempotencyKey: crypto.randomUUID(),
+        currentMarketPrice: type === 'MARKET' ? 100 : Number(price), // Defaulting for market, usually from live feed
+        // API will need to fallback to user's portfolio if missing, or we send it here
       };
       if (type === 'LIMIT') {
-        payload.price = Number(price);
+        payload.limitPrice = Number(price);
       }
 
       const res = await apiFetch('/orders', {
@@ -46,7 +49,7 @@ export function OrderEntry({ symbol }: { symbol: string }) {
       } else {
         setMessage(`Error: ${data.error || 'Failed'}`);
       }
-    } catch (err) {
+    } catch (_err) {
       setMessage('Network error');
     } finally {
       setLoading(false);

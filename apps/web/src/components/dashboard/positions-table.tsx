@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { apiFetch } from '@/lib/api';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -10,10 +10,10 @@ export function PositionsTable() {
   const [positions, setPositions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchPositions = async () => {
+  const fetchPositions = useCallback(async () => {
     if (!user?.portfolioId) return;
     try {
-      const res = await apiFetch(`/portfolio/${user.portfolioId}/positions`, { method: 'GET' });
+      const res = await apiFetch(`/portfolios/${user.portfolioId}/positions`, { method: 'GET' });
       if (res.ok) {
         const data = await res.json();
         setPositions(data);
@@ -23,13 +23,13 @@ export function PositionsTable() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     fetchPositions();
     const interval = setInterval(fetchPositions, 5000);
     return () => clearInterval(interval);
-  }, [user]);
+  }, [fetchPositions]);
 
   if (loading) return <div>Loading positions...</div>;
 

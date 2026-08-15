@@ -13,9 +13,11 @@
     "dev:engine": "nodemon src/main.engine.ts",
     "dev:workers": "nodemon src/main.workers.ts",
     "dev:feed": "nodemon src/main.feed.ts",
+    "dev": "concurrently 'npm run dev:api' 'npm run dev:engine' 'npm run dev:workers' 'npm run dev:feed'",
     "test": "jest --runInBand",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed:e2e": "ts-node src/scripts/seed-e2e.ts"
   },
   "keywords": [],
   "author": "",
@@ -48,6 +50,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.19.43",
     "@types/supertest": "^7.2.1",
+    "concurrently": "^10.0.4",
     "jest": "^30.4.2",
     "nodemon": "^3.1.14",
     "socket.io-client": "^4.8.3",

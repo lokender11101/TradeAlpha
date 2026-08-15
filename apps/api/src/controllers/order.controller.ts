@@ -18,6 +18,16 @@ export class OrderController {
         return;
       }
       dto.userId = req.user.id;
+      
+      if (!dto.portfolioId) {
+        const portfolio = await prisma.portfolio.findFirst({ where: { userId: dto.userId } });
+        if (portfolio) {
+          dto.portfolioId = portfolio.id;
+        } else {
+          res.status(400).json({ error: 'No portfolio found for user' });
+          return;
+        }
+      }
 
       const order = await orderService.placeOrder(dto);
       res.status(201).json(order);
@@ -54,7 +64,13 @@ export class OrderController {
 
       const where: any = { userId };
 
-      if (req.query.status) where.status = req.query.status;
+      if (req.query.status) {
+        let statuses = req.query.status;
+        if (typeof statuses === 'string' && statuses.includes(',')) {
+          statuses = statuses.split(',');
+        }
+        where.status = { in: Array.isArray(statuses) ? statuses : [statuses] };
+      }
       if (req.query.symbol) where.symbol = req.query.symbol;
       if (req.query.side) where.side = req.query.side;
       if (req.query.type) where.type = req.query.type;

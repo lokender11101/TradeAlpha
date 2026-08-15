@@ -109,7 +109,7 @@ describe('Phase 2.9 E2E Orchestration', () => {
       })
       .send({
         portfolioId,
-        symbol: 'AAPL',
+        symbol: 'RELIANCE',
         side: 'BUY',
         type: 'LIMIT',
         requestedQuantity: '10',
@@ -138,8 +138,8 @@ describe('Phase 2.9 E2E Orchestration', () => {
     // when it receives engine:route, and we might have pushed the tick before it was loaded into memory.
     const tickInterval = setInterval(async () => {
       try {
-        await ioredisClient.publish('market:tick:AAPL', JSON.stringify({
-          symbol: 'AAPL',
+        await ioredisClient.publish('market:tick:RELIANCE', JSON.stringify({
+          symbol: 'RELIANCE',
           price: '149.0',
           timestamp: new Date().toISOString()
         }));
@@ -173,7 +173,7 @@ describe('Phase 2.9 E2E Orchestration', () => {
 
     // Verify Position
     const position = await prisma.position.findFirst({
-      where: { portfolioId, symbol: 'AAPL' }
+      where: { portfolioId, symbol: 'RELIANCE' }
     });
     expect(position?.quantity.toString()).toBe('10');
   }, 45000);

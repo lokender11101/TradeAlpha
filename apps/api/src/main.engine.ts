@@ -28,7 +28,7 @@ const priceCacheService = new PriceCacheService(ioredisClient);
 
 const assignedSymbols = process.env.SYMBOLS_HANDLED 
   ? process.env.SYMBOLS_HANDLED.split(',') 
-  : ['AAPL', 'MSFT', 'TSLA', 'GOOGL', 'AMZN'];
+  : ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK'];
 
 const tradingEngine = new TradingEngine(redisUrl, prisma, orderService, priceCacheService, assignedSymbols);
 

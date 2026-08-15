@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { useAuth } from './auth-context';
 
 interface SocketContextType {
   socket: Socket | null;
@@ -11,27 +12,55 @@ interface SocketContextType {
 const SocketContext = createContext<SocketContextType>({ socket: null, connected: false });
 
 export function SocketProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    // Only connect if we have a token cookie available in requests, 
-    // Socket.io will send it automatically because withCredentials: true.
+    // Only connect when the user is authenticated (token cookie will be present)
+    if (!user) {
+      // Disconnect any existing socket when user logs out
+      if (socket) {
+        socket.close();
+        setTimeout(() => {
+          setSocket(null);
+          setConnected(false);
+        }, 0);
+      }
+      return;
+    }
+
+    // If socket already exists and is connected, skip
+    if (socket?.connected) return;
+
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-    const newSocket = io(baseUrl, {
+    const socketUrl = new URL(baseUrl).origin;
+    const socketIo = io(socketUrl, {
       withCredentials: true,
       transports: ['websocket', 'polling']
     });
 
-    setSocket(newSocket);
+    socketIo.on('connect', () => {
+      console.log('Socket connected with ID:', socketIo.id);
+      setConnected(true);
+    });
 
-    newSocket.on('connect', () => setConnected(true));
-    newSocket.on('disconnect', () => setConnected(false));
-    
+    socketIo.on('disconnect', () => {
+      console.log('Socket disconnected');
+      setConnected(false);
+    });
+
+    socketIo.on('connect_error', (error) => {
+      console.error('Socket connect_error:', error);
+    });
+
+    setSocket(socketIo);
+
     return () => {
-      newSocket.close();
+      console.log('Closing socket context connection');
+      socketIo.close();
     };
-  }, []);
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <SocketContext.Provider value={{ socket, connected }}>

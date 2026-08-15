@@ -19,32 +19,30 @@ model User {
 }
 
 model Portfolio {
-  id            String    @id @default(uuid())
-  userId        String    @map("user_id")
-  totalCash     Decimal   @default(0) @db.Decimal(19, 4) @map("total_cash")
-  lockedCash    Decimal   @default(0) @db.Decimal(19, 4) @map("locked_cash")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-
-  user          User       @relation(fields: [userId], references: [id])
-  positions     Position[]
-  orders        Order[]
+  id         String     @id @default(uuid())
+  userId     String     @map("user_id")
+  totalCash  Decimal    @default(0) @map("total_cash") @db.Decimal(19, 4)
+  lockedCash Decimal    @default(0) @map("locked_cash") @db.Decimal(19, 4)
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+  orders     Order[]
+  user       User       @relation(fields: [userId], references: [id])
+  positions  Position[]
 
   @@map("portfolios")
 }
 
 model Position {
-  id                String    @id @default(uuid())
-  portfolioId       String    @map("portfolio_id")
+  id                String         @id @default(uuid())
+  portfolioId       String         @map("portfolio_id")
   symbol            String
-  quantity          Decimal   @db.Decimal(19, 4) @default(0)
-  lockedQuantity    Decimal   @db.Decimal(19, 4) @default(0) @map("locked_quantity")
-  averageEntryPrice Decimal   @db.Decimal(19, 4) @map("average_entry_price") @default(0)
-  realizedPnl       Decimal   @default(0) @db.Decimal(19, 4) @map("realized_pnl")
+  quantity          Decimal        @default(0) @db.Decimal(19, 4)
+  lockedQuantity    Decimal        @default(0) @map("locked_quantity") @db.Decimal(19, 4)
+  averageEntryPrice Decimal        @default(0) @map("average_entry_price") @db.Decimal(19, 4)
+  realizedPnl       Decimal        @default(0) @map("realized_pnl") @db.Decimal(19, 4)
+  updatedAt         DateTime       @updatedAt @map("updated_at")
   status            PositionStatus @default(OPEN)
-  updatedAt         DateTime  @updatedAt @map("updated_at")
-
-  portfolio         Portfolio @relation(fields: [portfolioId], references: [id])
+  portfolio         Portfolio      @relation(fields: [portfolioId], references: [id])
 
   @@unique([portfolioId, symbol])
   @@map("positions")
@@ -57,22 +55,21 @@ model Order {
   symbol            String
   side              OrderSide
   type              OrderType
-  requestedQuantity Decimal     @db.Decimal(19, 4) @map("requested_quantity")
-  filledQuantity    Decimal     @default(0) @db.Decimal(19, 4) @map("filled_quantity")
-  limitPrice        Decimal?    @db.Decimal(19, 4) @map("limit_price")
-  stopPrice         Decimal?    @db.Decimal(19, 4) @map("stop_price")
-  reservationPrice  Decimal?    @db.Decimal(19, 4) @map("reservation_price")
-  isActivated       Boolean     @default(false) @map("is_activated")
+  requestedQuantity Decimal     @map("requested_quantity") @db.Decimal(19, 4)
+  filledQuantity    Decimal     @default(0) @map("filled_quantity") @db.Decimal(19, 4)
+  limitPrice        Decimal?    @map("limit_price") @db.Decimal(19, 4)
+  stopPrice         Decimal?    @map("stop_price") @db.Decimal(19, 4)
   status            OrderStatus @default(RECEIVED)
   idempotencyKey    String      @map("idempotency_key")
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @updatedAt @map("updated_at")
-
-  portfolio         Portfolio   @relation(fields: [portfolioId], references: [id])
+  reservationPrice  Decimal?    @map("reservation_price") @db.Decimal(19, 4)
+  isActivated       Boolean     @default(false) @map("is_activated")
   fills             OrderFill[]
+  portfolio         Portfolio   @relation(fields: [portfolioId], references: [id])
 
   @@unique([userId, idempotencyKey], name: "idx_orders_user_idempotency")
-  @@index([userId, status], name: "idx_orders_user_status")
+  @@index([userId, status], map: "idx_orders_user_status")
   @@map("orders")
 }
 
@@ -81,23 +78,21 @@ model OrderFill {
   orderId                 String   @map("order_id")
   price                   Decimal  @db.Decimal(19, 4)
   quantity                Decimal  @db.Decimal(19, 4)
-  realizedPnl             Decimal  @default(0) @db.Decimal(19, 4) @map("realized_pnl")
   executedAt              DateTime @default(now()) @map("executed_at")
   executionIdempotencyKey String   @default(uuid()) @map("execution_idempotency_key")
+  realizedPnl             Decimal  @default(0) @map("realized_pnl") @db.Decimal(19, 4)
+  order                   Order    @relation(fields: [orderId], references: [id])
 
-  order       Order    @relation(fields: [orderId], references: [id])
-
-  @@index([orderId])
   @@unique([orderId, executionIdempotencyKey])
+  @@index([orderId])
   @@map("order_fills")
 }
 
 model LedgerTransaction {
-  id            String   @id @default(uuid())
-  referenceType String   @map("reference_type")
-  referenceId   String   @map("reference_id")
-  createdAt     DateTime @default(now()) @map("created_at")
-
+  id            String        @id @default(uuid())
+  referenceType String        @map("reference_type")
+  referenceId   String        @map("reference_id")
+  createdAt     DateTime      @default(now()) @map("created_at")
   entries       LedgerEntry[]
 
   @@index([referenceType, referenceId])
@@ -105,14 +100,13 @@ model LedgerTransaction {
 }
 
 model LedgerEntry {
-  id            String   @id @default(uuid())
-  transactionId String   @map("transaction_id")
-  accountId     String   @map("account_id")
-  assetType     String   @map("asset_type") // FIAT or SECURITY
-  assetSymbol   String   @map("asset_symbol") // INR, AAPL, etc.
-  debit         Decimal  @default(0) @db.Decimal(19, 4)
-  credit        Decimal  @default(0) @db.Decimal(19, 4)
-
+  id            String            @id @default(uuid())
+  transactionId String            @map("transaction_id")
+  accountId     String            @map("account_id")
+  assetType     String            @map("asset_type")
+  assetSymbol   String            @map("asset_symbol")
+  debit         Decimal           @default(0) @db.Decimal(19, 4)
+  credit        Decimal           @default(0) @db.Decimal(19, 4)
   transaction   LedgerTransaction @relation(fields: [transactionId], references: [id])
 
   @@index([transactionId])
@@ -121,17 +115,17 @@ model LedgerEntry {
 }
 
 model OutboxEvent {
-  id            String    @id @default(uuid())
+  id            String      @id @default(uuid())
   type          String
-  aggregateType String    @map("aggregate_type")
-  aggregateId   String    @map("aggregate_id")
   payload       Json
   status        EventStatus @default(PENDING)
-  attempts      Int       @default(0)
-  nextRetryAt   DateTime? @map("next_retry_at")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  publishedAt   DateTime?   @map("published_at")
+  aggregateId   String      @map("aggregate_id")
+  aggregateType String      @map("aggregate_type")
+  attempts      Int         @default(0)
   error         String?
-  createdAt     DateTime  @default(now()) @map("created_at")
-  publishedAt   DateTime? @map("published_at")
+  nextRetryAt   DateTime?   @map("next_retry_at")
 
   @@index([status, nextRetryAt, createdAt])
   @@index([aggregateType, aggregateId])

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { apiFetch } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -9,26 +9,26 @@ export function OpenOrders() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       const res = await apiFetch('/orders?status=PENDING&status=PARTIALLY_FILLED', { method: 'GET' });
       if (res.ok) {
         const data = await res.json();
-        setOrders(data.orders);
+        setOrders(data.data || []);
       }
     } catch (err) {
       console.error('Failed to fetch open orders', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchOrders();
     // In a real app, you would also listen to Socket.IO for order updates to refresh this list
     const interval = setInterval(fetchOrders, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchOrders]);
 
   const handleCancel = async (orderId: string) => {
     try {

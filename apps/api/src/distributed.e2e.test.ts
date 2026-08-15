@@ -5,7 +5,7 @@ import { spawn, ChildProcess } from 'child_process';
 import * as crypto from 'crypto';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
-const API_PORT = 4100;
+const API_PORT = 4199;
 const DB_URL = process.env.DATABASE_URL || 'postgresql://tradealpha:password@localhost:5432/tradealpha?schema=public';
 
 const prisma = new PrismaClient({ datasources: { db: { url: DB_URL } } });
@@ -68,7 +68,7 @@ beforeAll(async () => {
   });
 
   engineProcess = spawn(process.execPath, ['-r', 'ts-node/register', 'src/main.engine.ts'], {
-    env: { ...process.env, NODE_ENV: 'development', SYMBOLS_HANDLED: 'AAPL,TSLA', DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret' },
+    env: { ...process.env, NODE_ENV: 'development', SYMBOLS_HANDLED: 'RELIANCE,TCS', DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret' },
     cwd: process.cwd()
   });
 
@@ -170,7 +170,7 @@ describe('Phase 4 Distributed E2E Test Suite', () => {
       },
       body: JSON.stringify({
         portfolioId: userPortfolioId,
-        symbol: 'AAPL',
+        symbol: 'RELIANCE',
         side: OrderSide.BUY,
         type: OrderType.MARKET,
         requestedQuantity: '10',
@@ -206,7 +206,7 @@ describe('Phase 4 Distributed E2E Test Suite', () => {
   });
   
   it('2. Ownership mismatch safely ignores non-owned routed orders', async () => {
-    // Post an order for MSFT (handled by NO engine in this test suite, as Engine only handles AAPL,TSLA)
+    // Post an order for HDFCBANK (handled by NO engine in this test suite, as Engine only handles RELIANCE,TCS)
     const email = `dist-test-3-${Date.now()}@example.com`;
     await fetch(`http://localhost:${API_PORT}/api/auth/register`, {
       method: 'POST',
@@ -237,7 +237,7 @@ describe('Phase 4 Distributed E2E Test Suite', () => {
       },
       body: JSON.stringify({
         portfolioId: userPortfolioId,
-        symbol: 'MSFT',
+        symbol: 'HDFCBANK',
         side: OrderSide.BUY,
         type: OrderType.MARKET,
         requestedQuantity: '10',

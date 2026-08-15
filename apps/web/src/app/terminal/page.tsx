@@ -6,6 +6,7 @@ import { useSocket } from '@/lib/socket-context';
 import { OrderEntry } from '@/components/terminal/order-entry';
 import { OrderBook } from '@/components/terminal/order-book';
 import { RecentTrades } from '@/components/terminal/recent-trades';
+import { OpenOrders } from '@/components/dashboard/open-orders';
 
 export default function TerminalPage() {
   const { user, loading } = useAuth();
@@ -66,6 +67,10 @@ export default function TerminalPage() {
         {/* Recent Trades */}
         <div className="md:col-span-3 lg:col-span-4">
           <RecentTrades />
+        </div>
+        {/* Open Orders */}
+        <div className="md:col-span-3 lg:col-span-4">
+          <OpenOrders />
         </div>
       </div>
     </div>

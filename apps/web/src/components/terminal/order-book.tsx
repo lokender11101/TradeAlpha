@@ -17,6 +17,7 @@ export function OrderBook({ symbol }: { symbol: string }) {
     if (!socket || !connected) return;
 
     const handleTick = (tick: any) => {
+      console.log('Received tick:', tick);
       if (tick.symbol === symbol) {
         setCurrentPrice(parseFloat(tick.price));
       }
@@ -25,10 +26,11 @@ export function OrderBook({ symbol }: { symbol: string }) {
     socket.on('market:tick', handleTick);
     
     // Subscribe to symbol if backend requires it (optional depending on implementation)
-    // socket.emit('subscribe', symbol);
+    socket.emit('join_market', symbol);
 
     return () => {
       socket.off('market:tick', handleTick);
+      socket.emit('leave_market', symbol);
     };
   }, [socket, connected, symbol]);
 
@@ -91,7 +93,7 @@ export function OrderBook({ symbol }: { symbol: string }) {
 
         {/* Current Price */}
         <div className="py-2 border-y my-1 flex items-center justify-between font-bold text-lg">
-          <span className={currentPrice ? 'text-primary' : 'text-muted-foreground'}>
+          <span data-testid="live-price" className={currentPrice ? 'text-primary' : 'text-muted-foreground'}>
             {currentPrice ? currentPrice.toFixed(2) : '---'}
           </span>
           <span className="text-xs font-normal text-muted-foreground uppercase">Spread: 0.10</span>

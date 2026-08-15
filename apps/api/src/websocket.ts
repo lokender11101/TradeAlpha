@@ -46,6 +46,35 @@ export class WebSocketServer {
 
     this.setupAuthentication();
     this.setupEventHandlers();
+    this.setupRedisBridging();
+  }
+
+  private setupRedisBridging() {
+    // The subClient is already used by Socket.io adapter, so we use a separate one for psubscribe
+    const bridgeSubClient = this.pubClient.duplicate();
+    bridgeSubClient.psubscribe('market:tick:*', (err, count) => {
+      if (err) {
+        logger.error({ err }, 'Failed to psubscribe to market:tick:*');
+      } else {
+        logger.info(`Bridging WebSocket to Redis PubSub. Subscribed to ${count} patterns.`);
+      }
+    });
+
+    bridgeSubClient.on('pmessage', (pattern, channel, message) => {
+      if (pattern === 'market:tick:*') {
+        try {
+          const payload = JSON.parse(message);
+          const symbol = payload.symbol;
+          if (symbol) {
+            const room = `market:${symbol}`;
+            logger.info({ symbol, room, channel }, 'Bridging tick to WebSocket room');
+            this.io.emit('market:tick', payload);
+          }
+        } catch (e) {
+          logger.error({ err: e }, 'Failed to parse market tick message');
+        }
+      }
+    });
   }
 
   private setupAuthentication() {
@@ -63,6 +92,7 @@ export class WebSocketServer {
       }
       
       if (!token || typeof token !== 'string') {
+        logger.warn({ socketId: socket.id, cookies: socket.request.headers.cookie }, 'WebSocket connection rejected: Missing token');
         return next(new Error('Authentication Error: Missing token'));
       }
 
@@ -137,7 +167,7 @@ export class WebSocketServer {
           const room = `market:${symbol}`;
           await socket.join(room);
           subscriptions.add(symbol);
-          logger.debug({ socketId: socket.id, symbol }, 'Client joined market room');
+          logger.info({ socketId: socket.id, symbol }, 'Client joined market room');
           callback?.({ success: true });
         } catch (error) {
           logger.error({ err: error, socketId: socket.id }, 'Error in join_market');

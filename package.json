@@ -7,10 +7,13 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:all": "npm run dev --workspaces",
+    "dev:all": "concurrently \"npm run dev --workspace=api\" \"npm run dev --workspace=web\"",
     "build:all": "npm run build --workspaces",
     "test:all": "npm run test --workspaces",
     "lint:all": "npm run lint --workspaces",
     "typecheck:all": "npm run typecheck --workspaces"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.4"
   }
 }
