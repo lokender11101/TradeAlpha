@@ -37,7 +37,8 @@ export class OrderController {
         error.message.includes('Insufficient') || 
         error.message.includes('Unauthorized') || 
         error.message.includes('require') ||
-        error.message.includes('Quantity must be')
+        error.message.includes('Quantity must be') ||
+        error.message.includes('Market is closed')
         ) {
           res.status(400).json({ error: error.message });
         } else {

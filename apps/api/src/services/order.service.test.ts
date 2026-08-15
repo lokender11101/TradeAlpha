@@ -46,6 +46,7 @@ describe('OrderService - State Machine & Concurrency (Phase 2.3)', () => {
         [OrderStatus.ACCEPTED, OrderStatus.PENDING],
         [OrderStatus.ACCEPTED, OrderStatus.CANCELLED],
         [OrderStatus.ACCEPTED, OrderStatus.REJECTED],
+        [OrderStatus.ACCEPTED, OrderStatus.EXPIRED],
         [OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED],
         [OrderStatus.PENDING, OrderStatus.FILLED],
         [OrderStatus.PENDING, OrderStatus.CANCELLED],
@@ -363,6 +364,112 @@ describe('OrderService - State Machine & Concurrency (Phase 2.3)', () => {
       
       // Ensure invariants hold (no negative locked cash)
       expect(Number(portfolioAfter.lockedCash)).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('Market Session Fencing (Phase 6.1)', () => {
+    let orderId: string;
+    
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('should reject placeOrder at 09:14:59', async () => {
+      jest.spyOn(require('./time.provider').defaultTimeProvider, 'now').mockReturnValue(new Date('2023-10-10T03:44:59Z')); // 09:14:59 IST
+      await expect(orderService.placeOrder({
+        userId,
+        portfolioId,
+        symbol: 'RELIANCE',
+        side: 'BUY',
+        type: 'MARKET',
+        requestedQuantity: '10',
+        currentMarketPrice: '100',
+        idempotencyKey: 'test-fencing-1'
+      })).rejects.toThrow('Market is closed');
+    });
+
+    it('should accept placeOrder at 09:15:00', async () => {
+      jest.spyOn(require('./time.provider').defaultTimeProvider, 'now').mockReturnValue(new Date('2023-10-10T03:45:00Z')); // 09:15:00 IST
+      const order = await orderService.placeOrder({
+        userId,
+        portfolioId,
+        symbol: 'RELIANCE',
+        side: 'BUY',
+        type: 'MARKET',
+        requestedQuantity: '10',
+        currentMarketPrice: '100',
+        idempotencyKey: 'test-fencing-2'
+      });
+      expect(order.status).toBe('ACCEPTED');
+    });
+
+    it('should accept placeOrder at 15:29:59', async () => {
+      jest.spyOn(require('./time.provider').defaultTimeProvider, 'now').mockReturnValue(new Date('2023-10-10T09:59:59Z')); // 15:29:59 IST
+      const order = await orderService.placeOrder({
+        userId,
+        portfolioId,
+        symbol: 'RELIANCE',
+        side: 'BUY',
+        type: 'MARKET',
+        requestedQuantity: '10',
+        currentMarketPrice: '100',
+        idempotencyKey: 'test-fencing-3'
+      });
+      expect(order.status).toBe('ACCEPTED');
+      orderId = order.id;
+    });
+
+    it('should reject placeOrder at 15:30:00', async () => {
+      jest.spyOn(require('./time.provider').defaultTimeProvider, 'now').mockReturnValue(new Date('2023-10-10T10:00:00Z')); // 15:30:00 IST
+      await expect(orderService.placeOrder({
+        userId,
+        portfolioId,
+        symbol: 'RELIANCE',
+        side: 'BUY',
+        type: 'MARKET',
+        requestedQuantity: '10',
+        currentMarketPrice: '100',
+        idempotencyKey: 'test-fencing-4'
+      })).rejects.toThrow('Market is closed');
+    });
+
+    it('should reject placeOrder at 15:30:01', async () => {
+      jest.spyOn(require('./time.provider').defaultTimeProvider, 'now').mockReturnValue(new Date('2023-10-10T10:00:01Z')); // 15:30:01 IST
+      await expect(orderService.placeOrder({
+        userId,
+        portfolioId,
+        symbol: 'RELIANCE',
+        side: 'BUY',
+        type: 'MARKET',
+        requestedQuantity: '10',
+        currentMarketPrice: '100',
+        idempotencyKey: 'test-fencing-5'
+      })).rejects.toThrow('Market is closed');
+    });
+
+    it('should transition ACCEPTED to EXPIRED if markOrderPending called after 15:30', async () => {
+      // Setup: Order was accepted at 15:29:59 (test above).
+      const orderBefore = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+      expect(orderBefore.status).toBe('ACCEPTED');
+      
+      const portfolioBefore = await prisma.portfolio.findUniqueOrThrow({ where: { id: portfolioId } });
+
+      // Advance time to 15:30:05
+      jest.spyOn(require('./time.provider').defaultTimeProvider, 'now').mockReturnValue(new Date('2023-10-10T10:00:05Z'));
+
+      // Action: Dispatcher tries to mark it pending
+      const orderAfter = await orderService.markOrderPending(orderId);
+
+      // Assertions
+      expect(orderAfter.status).toBe('EXPIRED');
+      
+      // Reservation released
+      const portfolioAfter = await prisma.portfolio.findUniqueOrThrow({ where: { id: portfolioId } });
+      const reservedAmount = Number(orderBefore.reservationPrice) * Number(orderBefore.requestedQuantity);
+      expect(Number(portfolioAfter.lockedCash)).toBe(Number(portfolioBefore.lockedCash) - reservedAmount);
+
+      // Repeated calls remain safe (idempotent)
+      await expect(orderService.markOrderPending(orderId)).rejects.toThrow(/Invalid state transition/);
     });
   });
 });

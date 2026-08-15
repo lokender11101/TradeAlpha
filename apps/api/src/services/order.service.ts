@@ -2,6 +2,7 @@ import { createEnvelope } from '../utils/envelope';
 import { Prisma, PrismaClient, OrderSide, OrderType, OrderStatus, Order } from '@prisma/client';
 import { LedgerService } from './ledger.service';
 import { PositionService } from './position.service';
+import { defaultMarketSessionService } from './market-session.service';
 
 export type PlaceOrderDto = {
   userId: string;
@@ -26,7 +27,7 @@ export type FillOrderDto = {
 const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   RECEIVED: ['VALIDATED', 'REJECTED'],
   VALIDATED: ['ACCEPTED', 'REJECTED'],
-  ACCEPTED: ['PENDING', 'CANCELLED', 'REJECTED'],
+  ACCEPTED: ['PENDING', 'CANCELLED', 'REJECTED', 'EXPIRED'],
   PENDING: ['PARTIALLY_FILLED', 'FILLED', 'CANCELLED', 'EXPIRED', 'REJECTED'],
   PARTIALLY_FILLED: ['PARTIALLY_FILLED', 'FILLED', 'CANCELLED', 'EXPIRED'],
   FILLED: [],
@@ -50,6 +51,8 @@ export class OrderService {
     if (dto.type === 'LIMIT' && !dto.limitPrice) throw new Error('LIMIT orders require a limitPrice');
     if (dto.type === 'STOP' && !dto.stopPrice) throw new Error('STOP orders require a stopPrice');
     if (dto.type === 'STOP_LIMIT' && (!dto.stopPrice || !dto.limitPrice)) throw new Error('STOP_LIMIT orders require both stopPrice and limitPrice');
+
+    defaultMarketSessionService.assertOpen();
 
     const existing = await this.prisma.order.findUnique({
       where: { idx_orders_user_idempotency: { userId: dto.userId, idempotencyKey: dto.idempotencyKey } }
@@ -130,12 +133,21 @@ export class OrderService {
   }
 
   public async markOrderPending(orderId: string): Promise<Order> {
+    if (!defaultMarketSessionService.isOpen()) {
+      return this.expireOrder(orderId);
+    }
+
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT 1 FROM orders WHERE id = ${orderId} FOR UPDATE`;
       const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
       
       if (!OrderService.isValidTransition(order.status, OrderStatus.PENDING)) {
         throw new Error(`Invalid state transition from ${order.status} to PENDING`);
+      }
+      
+      // Secondary check inside the transaction for safety against exact edge race
+      if (!defaultMarketSessionService.isOpen()) {
+        throw new Error(`Market is closed`); // Throws to trigger a retry which will hit the outer expireOrder check
       }
       
       const updatedOrder = await tx.order.update({
