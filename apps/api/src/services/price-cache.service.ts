@@ -10,6 +10,8 @@ const logger = pino({
   }
 });
 
+import { defaultTimeProvider } from './time.provider';
+
 export class PriceCacheService {
   private redis: Redis;
   private readonly STALE_THRESHOLD_MS: number;
@@ -47,10 +49,10 @@ export class PriceCacheService {
 
       const parsed = JSON.parse(data);
       const updatedAt = new Date(parsed.timestamp);
-      const now = Date.now();
+      const now = defaultTimeProvider.now().getTime();
 
       if (now - updatedAt.getTime() > this.STALE_THRESHOLD_MS) {
-        return { price: null, isStale: true, updatedAt };
+        return { price: parsed.price, isStale: true, updatedAt };
       }
 
       return { price: parsed.price, isStale: false, updatedAt };

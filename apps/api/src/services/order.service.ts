@@ -380,6 +380,7 @@ export class OrderService {
   }
 
   public async expireOrder(orderId: string): Promise<Order> {
+    console.log("@@@ EXPIRE ORDER CALLED: " + orderId, new Error().stack);
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT 1 FROM portfolios WHERE id = (SELECT portfolio_id FROM orders WHERE id = ${orderId}) FOR UPDATE`;
       await tx.$executeRaw`SELECT 1 FROM positions WHERE portfolio_id = (SELECT portfolio_id FROM orders WHERE id = ${orderId}) AND symbol = (SELECT symbol FROM orders WHERE id = ${orderId}) FOR UPDATE`;

@@ -338,7 +338,7 @@ export class TradingEngine {
           if (!this.ownedSymbols.has(payload.symbol)) {
              return; 
           }
-          this.evaluateOrder(engineOrder, tickPrice).catch((err) => {
+          this.evaluateOrder(engineOrder, tickPrice, payload.timestamp).catch((err) => {
              logger.error({err, orderId: engineOrder.order.id}, 'Error evaluating order');
           });
         }
@@ -348,7 +348,7 @@ export class TradingEngine {
     }
   }
 
-  private async evaluateOrder(engineOrder: EngineOrder, tickPrice: Prisma.Decimal): Promise<void> {
+  private async evaluateOrder(engineOrder: EngineOrder, tickPrice: Prisma.Decimal, tickTimestamp?: string): Promise<void> {
     const { order } = engineOrder;
 
     // Fencing
@@ -361,7 +361,7 @@ export class TradingEngine {
       
       if (triggered) {
         logger.info({ orderId: order.id, tickPrice: tickPrice.toString() }, '[Engine] STOP triggered, converting to MARKET execution');
-        await this.triggerExecution(engineOrder, tickPrice);
+        await this.triggerExecution(engineOrder, tickPrice, tickTimestamp);
       }
       return;
     }
@@ -395,13 +395,13 @@ export class TradingEngine {
                       (order.side === OrderSide.SELL && tickPrice.gte(limitPrice));
       
       if (canFill) {
-        await this.triggerExecution(engineOrder, tickPrice);
+        await this.triggerExecution(engineOrder, tickPrice, tickTimestamp);
       }
       return;
     }
 
     if (order.type === OrderType.MARKET) {
-      await this.triggerExecution(engineOrder, tickPrice);
+      await this.triggerExecution(engineOrder, tickPrice, tickTimestamp);
       return;
     }
 
@@ -410,13 +410,13 @@ export class TradingEngine {
       const canFill = (order.side === OrderSide.BUY && tickPrice.lte(limitPrice)) ||
                       (order.side === OrderSide.SELL && tickPrice.gte(limitPrice));
       if (canFill) {
-        await this.triggerExecution(engineOrder, tickPrice);
+        await this.triggerExecution(engineOrder, tickPrice, tickTimestamp);
       }
       return;
     }
   }
 
-  private async triggerExecution(engineOrder: EngineOrder, tickPrice: Prisma.Decimal): Promise<void> {
+  private async triggerExecution(engineOrder: EngineOrder, tickPrice: Prisma.Decimal, tickTimestamp?: string): Promise<void> {
     const order = engineOrder.order;
     
     // Strict Stale Owner Fencing before dispatch
@@ -444,7 +444,8 @@ export class TradingEngine {
         price: tickPrice.toString(), 
         quantity: remainingQty.toString(), 
         executionIdempotencyKey,
-        correlationId: engineOrder.correlationId
+        correlationId: engineOrder.correlationId,
+        originTimestamp: tickTimestamp || new Date().toISOString()
       },
       {
         jobId: executionIdempotencyKey, 

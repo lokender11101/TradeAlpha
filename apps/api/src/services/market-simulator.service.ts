@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { defaultTimeProvider } from './time.provider';
 
 export interface MarketTick {
   symbol: string;
@@ -98,7 +99,7 @@ export class MarketSimulatorService extends EventEmitter {
     const tick: MarketTick = {
       symbol,
       price: price.toFixed(4),
-      timestamp: new Date(),
+      timestamp: defaultTimeProvider.now(),
     };
     this.emit('tick', tick);
   }

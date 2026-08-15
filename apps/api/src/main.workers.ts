@@ -7,6 +7,7 @@ import { DomainEventDispatcherWorker } from './workers/domain-event-dispatcher.w
 import { OrderService } from './services/order.service';
 
 dotenv.config();
+console.log(`[Workers Boot] NODE_ENV=${process.env.NODE_ENV}, MOCK_TIME=${process.env.MOCK_TIME}`);
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -24,9 +25,12 @@ const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
 const orderService = new OrderService(prisma);
 
+import { EodSweepService } from './services/eod-sweep.service';
+
 const outboxWorker = new OutboxWorker(prisma, redisUrl);
 const executionWorker = new ExecutionWorker(prisma, redisUrl);
 const domainEventDispatcher = new DomainEventDispatcherWorker(redisUrl, orderService);
+const eodSweepService = new EodSweepService(redisUrl, prisma);
 
 if (process.env.NODE_ENV !== 'test') {
   logger.info('[Workers] Starting background workers...');
@@ -34,6 +38,7 @@ if (process.env.NODE_ENV !== 'test') {
   Promise.all([
     outboxWorker.start(),
   ]).then(() => {
+    eodSweepService.start();
     logger.info('[Workers] All background workers started successfully.');
   }).catch(err => {
     logger.error({ err }, 'Failed to start background workers');
@@ -42,6 +47,7 @@ if (process.env.NODE_ENV !== 'test') {
 
   const shutdown = async () => {
     logger.info('Shutting down background workers...');
+    eodSweepService.stop();
     await outboxWorker.stop();
     await executionWorker.close();
     await domainEventDispatcher.close();
@@ -53,4 +59,4 @@ if (process.env.NODE_ENV !== 'test') {
   process.on('SIGTERM', shutdown);
 }
 
-export { outboxWorker, executionWorker, domainEventDispatcher };
+export { outboxWorker, executionWorker, domainEventDispatcher, eodSweepService };

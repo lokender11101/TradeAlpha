@@ -62,28 +62,34 @@ beforeAll(async () => {
   
   // Let's spawn the processes.
   apiProcess = spawn(process.execPath, ['-r', 'ts-node/register', 'src/main.api.ts'], {
-    env: { ...process.env, NODE_ENV: 'development', PORT: API_PORT.toString(), DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret' },
+    env: { ...process.env, NODE_ENV: 'development', PORT: API_PORT.toString(), DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret', MOCK_TIME: 'true' },
     cwd: process.cwd(),
     stdio: 'inherit'
   });
 
   engineProcess = spawn(process.execPath, ['-r', 'ts-node/register', 'src/main.engine.ts'], {
-    env: { ...process.env, NODE_ENV: 'development', SYMBOLS_HANDLED: 'RELIANCE,TCS', DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret' },
+    env: { ...process.env, NODE_ENV: 'development', SYMBOLS_HANDLED: 'RELIANCE,TCS', DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret', MOCK_TIME: 'true' },
     cwd: process.cwd()
   });
 
   workersProcess = spawn(process.execPath, ['-r', 'ts-node/register', 'src/main.workers.ts'], {
-    env: { ...process.env, NODE_ENV: 'development', DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret' },
-    cwd: process.cwd()
+    env: { ...process.env, NODE_ENV: 'development', DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret', MOCK_TIME: 'true' },
+    cwd: process.cwd(),
+    stdio: 'inherit'
   });
 
   feedProcess = spawn(process.execPath, ['-r', 'ts-node/register', 'src/main.feed.ts'], {
-    env: { ...process.env, NODE_ENV: 'development', DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret' },
+    env: { ...process.env, NODE_ENV: 'development', DATABASE_URL: DB_URL, REDIS_URL, JWT_SECRET: 'test-secret', MOCK_TIME: 'true' },
     cwd: process.cwd()
   });
 
-  // Wait for API
-  await waitForServer(`http://localhost:${API_PORT}/health`);
+  // Wait for API to be fully healthy
+  await waitForServer(`http://localhost:${API_PORT}/health`, 20000);
+  
+  // Wait additional time for background workers and engine to connect to Redis
+  // and acquire their leases to prevent Pub/Sub race conditions where early
+  // messages are dropped before subscribers are fully ready.
+  await wait(5000);
 
   // Get real token
   const res = await fetch(`http://localhost:${API_PORT}/api/auth/login`, {

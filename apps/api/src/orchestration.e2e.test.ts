@@ -21,6 +21,7 @@ describe('Phase 2.9 E2E Orchestration', () => {
 
   beforeAll(async () => {
     // Override port to 0 for random available port to avoid conflicts
+    process.env.MOCK_TIME = 'true';
     process.env.PORT = '0';
     process.env.JWT_SECRET = 'test-secret';
     const ioredis = new (require('ioredis').Redis)('redis://localhost:6379');
@@ -141,7 +142,7 @@ describe('Phase 2.9 E2E Orchestration', () => {
         await ioredisClient.publish('market:tick:RELIANCE', JSON.stringify({
           symbol: 'RELIANCE',
           price: '149.0',
-          timestamp: new Date().toISOString()
+          timestamp: '2026-08-15T06:30:00.000Z'
         }));
       } catch (err) {} // ignore closed connection errors
     }, 500);

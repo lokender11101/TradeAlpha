@@ -1,6 +1,7 @@
 import Redis from 'ioredis';
 import { PriceCacheService, PriceCachePublisher } from './price-cache.service';
-import { MarketSimulatorService } from './market-simulator.service';
+import { MarketSimulatorService, MarketTick } from './market-simulator.service';
+import { defaultTimeProvider } from './time.provider';
 
 describe('PriceCacheService & PriceCachePublisher', () => {
   let redis: Redis;
@@ -42,16 +43,19 @@ describe('PriceCacheService & PriceCachePublisher', () => {
   });
 
   it('should return isStale = true if the price exceeds STALE_PRICE_THRESHOLD_MS', async () => {
-    simulator.pushTick('AAPL', 150.1234);
-    await new Promise(r => setTimeout(r, 10));
+    const tick: MarketTick = {
+      symbol: 'MSFT',
+      price: '250.00',
+      // Explicitly set an old timestamp (15 seconds ago) based on the current time provider
+      timestamp: new Date(defaultTimeProvider.now().getTime() - 15000)
+    };
+    await cacheService.publishTick(tick);
 
-    // Wait past the 100ms threshold
-    await new Promise(r => setTimeout(r, 150));
-
-    const result = await cacheService.getLatestPrice('AAPL');
+    const result = await cacheService.getLatestPrice('MSFT');
     expect(result.isStale).toBe(true);
-    expect(result.price).toBeNull();
-    expect(result.updatedAt).toBeInstanceOf(Date);
+    // Even if stale, it should return the last known price/date for UI display
+    expect(result.price).toBe('250.00');
+    expect(result.updatedAt?.getTime()).toBe(tick.timestamp.getTime());
   });
 
   it('should handle Redis unavailable/error behavior gracefully', async () => {

@@ -3,6 +3,7 @@ import { Worker, Job } from 'bullmq';
 import Redis from 'ioredis';
 import pino from 'pino';
 import { OrderService } from '../services/order.service';
+import { defaultMarketSessionService } from '../services/market-session.service';
 
 const logger = pino({
   transport: {
@@ -17,6 +18,7 @@ export interface ExecuteFillJob {
   quantity: string;
   executionIdempotencyKey: string;
   correlationId?: string;
+  originTimestamp?: string;
 }
 
 export class ExecutionWorker {
@@ -55,15 +57,42 @@ export class ExecutionWorker {
   }
 
   private async processJob(job: Job<ExecuteFillJob>): Promise<void> {
-    const { orderId, price, quantity, executionIdempotencyKey, correlationId } = job.data;
+    const { orderId, price, quantity, executionIdempotencyKey, correlationId, originTimestamp } = job.data;
     logger.info({ orderId, price, quantity, executionIdempotencyKey, correlationId: correlationId || 'system' }, 'Processing EXECUTE_FILL job');
 
-    // Delegate to OrderService which handles the strictly idempotent transaction
-    await this.orderService.processFill({
-      orderId,
-      price,
-      quantity,
-      fillIdempotencyKey: executionIdempotencyKey
-    });
+    if (originTimestamp) {
+      const originDate = new Date(originTimestamp);
+      const originState = defaultMarketSessionService.getSessionOriginState(originDate);
+      if (originState === 'CLOSED') {
+        logger.warn({ orderId, originTimestamp }, 'EXECUTE_FILL rejected: Origin timestamp belongs to a CLOSED market session');
+        return;
+      }
+    } else {
+      // For backwards compatibility or missing timestamps
+      if (!defaultMarketSessionService.isOpen()) {
+        logger.warn({ orderId }, 'EXECUTE_FILL rejected: Market is closed and no origin timestamp was provided');
+        return;
+      }
+    }
+
+    try {
+      // Delegate to OrderService which handles the strictly idempotent transaction
+      // It also verifies if the order is still executable (not EXPIRED, CANCELLED, or already FILLED)
+      // Because processFill locks the order and verifies its state.
+      await this.orderService.processFill({
+        orderId,
+        price,
+        quantity,
+        fillIdempotencyKey: executionIdempotencyKey
+      });
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('Invalid state transition')) {
+        // If order was expired by EOD sweep, processFill will throw invalid state transition.
+        // We catch it and warn, ignoring the stale fill.
+        logger.warn({ orderId, err: err.message }, 'EXECUTE_FILL stale: Order is no longer executable');
+        return;
+      }
+      throw err;
+    }
   }
 }

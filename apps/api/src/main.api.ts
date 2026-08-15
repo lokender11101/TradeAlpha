@@ -45,8 +45,11 @@ app.get('/health', (req: express.Request, res: express.Response) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+import { MarketController } from './controllers/market.controller';
+
 app.post('/api/orders', requireCsrfToken, authenticateJWT, OrderController.placeOrder);
 app.get('/api/orders', authenticateJWT, OrderController.getOrders);
+app.get('/api/market/status', MarketController.getStatus);
 app.delete('/api/orders/:id', requireCsrfToken, authenticateJWT, OrderController.cancelOrder);
 // Portfolio Routes
 app.get('/api/portfolios/:portfolioId', authenticateJWT, PortfolioController.getPortfolio);

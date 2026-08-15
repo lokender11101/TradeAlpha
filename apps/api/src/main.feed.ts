@@ -5,6 +5,7 @@ import * as crypto from 'crypto';
 import { MarketSimulatorService } from './services/market-simulator.service';
 import { PriceCachePublisher } from './services/price-cache.service';
 import { MarketDataPublisher } from './services/market-data-publisher';
+import { defaultMarketSessionService } from './services/market-session.service';
 
 dotenv.config();
 
@@ -81,7 +82,17 @@ class FeedLeaseService {
 
   private async heartbeat(): Promise<void> {
     if (!this.isOwned) {
-      await this.tryAcquireLease();
+      if (defaultMarketSessionService.isOpen()) {
+        await this.tryAcquireLease();
+      }
+      return;
+    }
+
+    if (!defaultMarketSessionService.isOpen()) {
+      logger.info('[FeedLeaseService] Market session CLOSED. Releasing lease and stopping simulations.');
+      this.isOwned = false;
+      this.stopSimulations();
+      await this.redis.eval(LUA_RELEASE, 1, 'feed:global', this.processToken);
       return;
     }
 
@@ -102,6 +113,10 @@ class FeedLeaseService {
   }
 
   private startSimulations(): void {
+    if (!defaultMarketSessionService.isOpen()) {
+      logger.info('[FeedLeaseService] Market is CLOSED. Not starting simulations.');
+      return;
+    }
     const symbols = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK'];
     symbols.forEach(symbol => {
       this.simulator.startSimulation({
