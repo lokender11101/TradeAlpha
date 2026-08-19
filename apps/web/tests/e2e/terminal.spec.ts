@@ -1,8 +1,17 @@
 import { test, expect } from '@playwright/test';
+import { execSync } from 'child_process';
+import Redis from 'ioredis';
 
 test.describe('Terminal E2E', () => {
-  test.beforeAll(async () => {
-    // We assume the DB is seeded beforehand via `npm run seed:e2e`
+  test.beforeAll(async ({ request }) => {
+    // Dynamically run the seed script to ensure E2E user exists
+    execSync('npm run seed:e2e --workspace=api', { stdio: 'inherit', cwd: '../../' });
+    
+    // Wait for the API to be ready to avoid ERR_CONNECTION_REFUSED
+    await expect(async () => {
+      const response = await request.get('http://localhost:4000/health');
+      expect(response.ok()).toBeTruthy();
+    }).toPass({ timeout: 30000, intervals: [1000] });
   });
 
   test('Baseline E2E Flow', async ({ page }) => {
@@ -17,7 +26,7 @@ test.describe('Terminal E2E', () => {
     await page.click('button:has-text("Sign in")');
 
     // Wait for redirect to dashboard
-    await expect(page).toHaveURL('/dashboard');
+    await page.waitForURL('/dashboard');
     await expect(page.locator('h1', { hasText: 'Portfolio Dashboard' })).toBeVisible();
 
     // Verify portfolio exists
@@ -25,7 +34,7 @@ test.describe('Terminal E2E', () => {
 
     // 2. Navigate to Terminal
     await page.click('a[href="/terminal"]');
-    await expect(page).toHaveURL('/terminal');
+    await page.waitForURL('/terminal');
     
     // 3. Symbol Selection
     // Ensure RELIANCE is selected
@@ -58,10 +67,23 @@ test.describe('Terminal E2E', () => {
     await page.fill('#qty', '5'); // Quantity
     await page.click('button:has-text("Place BUY Order")');
 
+    // Deterministically trigger the execution by publishing a tick to Redis
+    // using the top level import Redis
+    const redis = new Redis('redis://localhost:6379');
+    await redis.publish('market:tick:RELIANCE', JSON.stringify({
+      symbol: 'RELIANCE',
+      price: 150.00,
+      timestamp: new Date().toISOString()
+    }));
+    await redis.quit();
+
+    // Wait for the MARKET order to be FILLED (it should disappear from Open Orders)
+    await expect(page.locator('td', { hasText: 'PENDING' }).first()).toBeHidden({ timeout: 10000 });
+
     // 9. Portfolio / Position update
     // Go back to dashboard and check if positions are updated
     await page.click('a[href="/dashboard"]');
-    await expect(page).toHaveURL('/dashboard');
+    await page.waitForURL('/dashboard');
     await expect(page.locator('td', { hasText: 'RELIANCE' }).first()).toBeVisible({ timeout: 10000 });
 
     // 11. WebSocket Reconnect
@@ -72,7 +94,7 @@ test.describe('Terminal E2E', () => {
     
     // Reconnect should happen automatically, and we should see price updates again
     await page.click('a[href="/terminal"]');
-    await expect(page).toHaveURL('/terminal');
+    await page.waitForURL('/terminal');
     await expect(page.getByTestId('live-price')).not.toHaveText('---', { timeout: 15000 });
   });
 });

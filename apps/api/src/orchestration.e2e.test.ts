@@ -1,3 +1,5 @@
+import { defaultTimeProvider } from "./services/time.provider";
+
 import request from 'supertest';
 import { PrismaClient, OrderStatus } from '@prisma/client';
 import { app, httpServer, wsServer } from './main.api';
@@ -19,7 +21,12 @@ describe('Phase 2.9 E2E Orchestration', () => {
   let portfolioId: string;
   let clientSocket: ClientSocket | undefined;
 
+  let originalMockTime: string | undefined;
+  let originalJwtSecret: string | undefined;
+
   beforeAll(async () => {
+    originalMockTime = process.env.MOCK_TIME;
+    originalJwtSecret = process.env.JWT_SECRET;
     // Override port to 0 for random available port to avoid conflicts
     process.env.MOCK_TIME = 'true';
     process.env.PORT = '0';
@@ -75,6 +82,12 @@ describe('Phase 2.9 E2E Orchestration', () => {
   }, 30000);
 
   afterAll(async () => {
+    if (originalMockTime !== undefined) process.env.MOCK_TIME = originalMockTime;
+    else delete process.env.MOCK_TIME;
+    
+    if (originalJwtSecret !== undefined) process.env.JWT_SECRET = originalJwtSecret;
+    else delete process.env.JWT_SECRET;
+
     if (clientSocket) {
       clientSocket.disconnect();
     }
@@ -114,7 +127,7 @@ describe('Phase 2.9 E2E Orchestration', () => {
         side: 'BUY',
         type: 'LIMIT',
         requestedQuantity: '10',
-        limitPrice: '150.00',
+        limitPrice: '100.00',
         currentMarketPrice: '150.00',
         idempotencyKey: `e2e-${Date.now()}`
       });
@@ -137,28 +150,31 @@ describe('Phase 2.9 E2E Orchestration', () => {
     
     // We will push ticks repeatedly because the TradingEngine reads the DB asynchronously
     // when it receives engine:route, and we might have pushed the tick before it was loaded into memory.
-    const tickInterval = setInterval(async () => {
-      try {
-        await ioredisClient.publish('market:tick:RELIANCE', JSON.stringify({
-          symbol: 'RELIANCE',
-          price: '149.0',
-          timestamp: '2026-08-15T06:30:00.000Z'
-        }));
-      } catch (err) {} // ignore closed connection errors
-    }, 500);
+    let tickInterval: NodeJS.Timeout | undefined;
+    const wsFilledPromise2 = new Promise<void>((resolve, reject) => {
+      clientSocket!.on('ORDER_FILLED', (envelope: any) => {
+        if (envelope.payload.orderId === orderId) {
+          resolve();
+        }
+      });
+    });
 
     try {
-      // 2. Trigger execution via Market Simulator
-      // (This triggers TradingEngine which queues EXECUTE_FILL for ExecutionWorker)
+      tickInterval = setInterval(async () => {
+        const price = 90.0; // Deterministic price to make math exact (Cost = 900)
+        const timeNow = defaultTimeProvider.now();
+        console.log(`[TEST TICK] NODE_ENV=${process.env.NODE_ENV}, MOCK_TIME=${process.env.MOCK_TIME}, time=${timeNow.toISOString()}`);
+        await ioredisClient.publish(`market:tick:RELIANCE`, JSON.stringify({ symbol: 'RELIANCE', price, timestamp: timeNow }));
+      }, 500);
       
       // Wait for outbox to route events (DomainEventDispatcherWorker -> Engine)
       // And for engine to publish ORDER_FILLED
       await Promise.race([
-        wsFilledPromise,
+        wsFilledPromise2,
         new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout waiting for ORDER_FILLED event')), 30000))
       ]);
     } finally {
-      clearInterval(tickInterval);
+      if (tickInterval) clearInterval(tickInterval);
     }
 
     // 3. Final Verification
@@ -168,8 +184,8 @@ describe('Phase 2.9 E2E Orchestration', () => {
 
     // Verify Funds
     const updatedPortfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId } });
-    // Cost = 10 * 149 = 1490. Total should be 10000 - 1490 = 8510
-    expect(updatedPortfolio?.totalCash.toString()).toBe('8510');
+    // Cost = 10 * 90 = 900. Total should be 10000 - 900 = 9100
+    expect(updatedPortfolio?.totalCash.toString()).toBe('9100');
     expect(updatedPortfolio?.lockedCash.toString()).toBe('0');
 
     // Verify Position

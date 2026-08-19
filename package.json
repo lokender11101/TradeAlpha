@@ -10,6 +10,7 @@
     "dev:all": "concurrently \"npm run dev --workspace=api\" \"npm run dev --workspace=web\"",
     "build:all": "npm run build --workspaces",
     "test:all": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e --workspace=web",
     "lint:all": "npm run lint --workspaces",
     "typecheck:all": "npm run typecheck --workspaces"
   },

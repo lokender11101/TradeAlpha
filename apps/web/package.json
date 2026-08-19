@@ -6,8 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test:e2e": "playwright test --project=chromium",
-    "test:e2e:ui": "playwright test --ui",
+    "test:e2e": "MOCK_TIME=true playwright test",
+    "test:e2e:ui": "MOCK_TIME=true playwright test --ui",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
