@@ -26,17 +26,20 @@ const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const orderService = new OrderService(prisma);
 
 import { EodSweepService } from './services/eod-sweep.service';
+import { OhlcvAggregatorWorker } from './workers/ohlcv-aggregator.worker';
 
 const outboxWorker = new OutboxWorker(prisma, redisUrl);
 const executionWorker = new ExecutionWorker(prisma, redisUrl);
 const domainEventDispatcher = new DomainEventDispatcherWorker(redisUrl, orderService);
 const eodSweepService = new EodSweepService(redisUrl, prisma);
+const ohlcvAggregator = new OhlcvAggregatorWorker(prisma, redisUrl);
 
 if (process.env.NODE_ENV !== 'test') {
   logger.info('[Workers] Starting background workers...');
 
   Promise.all([
     outboxWorker.start(),
+    ohlcvAggregator.start(),
   ]).then(() => {
     eodSweepService.start();
     logger.info('[Workers] All background workers started successfully.');
@@ -49,6 +52,7 @@ if (process.env.NODE_ENV !== 'test') {
     logger.info('Shutting down background workers...');
     eodSweepService.stop();
     await outboxWorker.stop();
+    await ohlcvAggregator.stop();
     await executionWorker.close();
     await domainEventDispatcher.close();
     await prisma.$disconnect();
@@ -59,4 +63,4 @@ if (process.env.NODE_ENV !== 'test') {
   process.on('SIGTERM', shutdown);
 }
 
-export { outboxWorker, executionWorker, domainEventDispatcher, eodSweepService };
+export { outboxWorker, executionWorker, domainEventDispatcher, eodSweepService, ohlcvAggregator };

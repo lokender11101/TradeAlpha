@@ -1,9 +1,12 @@
 import { EventEmitter } from 'events';
+import crypto from 'crypto';
 import { defaultTimeProvider } from './time.provider';
 
 export interface MarketTick {
+  tickId: string;
   symbol: string;
   price: string;
+  volume: string;
   timestamp: Date;
 }
 
@@ -86,19 +89,25 @@ export class MarketSimulatorService extends EventEmitter {
   /**
    * Push a deterministic tick. Useful for tests or manual price injection.
    */
-  public pushTick(symbol: string, price: string | number): void {
+  public pushTick(symbol: string, price: string | number, volume: string = '100', tickId?: string): void {
     const numericPrice = typeof price === 'string' 
       ? parseFloat(price)
       : price;
 
     this.currentPrices.set(symbol, numericPrice);
-    this.emitTick(symbol, numericPrice);
+    this.emitTick(symbol, numericPrice, volume, tickId);
   }
 
-  private emitTick(symbol: string, price: number): void {
+  private emitTick(symbol: string, price: number, forcedVolume?: string, forcedTickId?: string): void {
+    // Generate synthetic volume if not forced
+    const volume = forcedVolume || (Math.floor(Math.random() * 500) + 1).toString();
+    const tickId = forcedTickId || crypto.randomUUID();
+
     const tick: MarketTick = {
+      tickId,
       symbol,
       price: price.toFixed(4),
+      volume,
       timestamp: defaultTimeProvider.now(),
     };
     this.emit('tick', tick);

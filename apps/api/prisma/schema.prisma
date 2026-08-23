@@ -166,3 +166,31 @@ enum PositionStatus {
   OPEN
   CLOSED
 }
+
+model MarketTickReceipt {
+  tickId      String   @id @map("tick_id")
+  symbol      String
+  timestamp   DateTime
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@map("market_tick_receipts")
+}
+
+model MarketCandle {
+  id                String   @id @default(uuid())
+  symbol            String
+  timeframe         String
+  timestamp         DateTime
+  open              Decimal  @db.Decimal(19, 4)
+  high              Decimal  @db.Decimal(19, 4)
+  low               Decimal  @db.Decimal(19, 4)
+  close             Decimal  @db.Decimal(19, 4)
+  volume            Decimal  @default(0) @db.Decimal(19, 4)
+  isClosed          Boolean  @default(false) @map("is_closed")
+  lastTickTimestamp DateTime @map("last_tick_timestamp")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@unique([symbol, timeframe, timestamp])
+  @@index([symbol, timeframe, timestamp(sort: Desc)])
+  @@map("market_candles")
+}

@@ -44,8 +44,10 @@ describe('PriceCacheService & PriceCachePublisher', () => {
 
   it('should return isStale = true if the price exceeds STALE_PRICE_THRESHOLD_MS', async () => {
     const tick: MarketTick = {
+      tickId: 'test-tick-1',
       symbol: 'MSFT',
       price: '250.00',
+      volume: '100',
       // Explicitly set an old timestamp (15 seconds ago) based on the current time provider
       timestamp: new Date(defaultTimeProvider.now().getTime() - 15000)
     };

@@ -17,8 +17,10 @@ export class MarketDataPublisher {
   private handleTick(tick: MarketTick): void {
     const channel = `market:tick:${tick.symbol}`;
     const payload = JSON.stringify({
+      tickId: tick.tickId,
       symbol: tick.symbol,
       price: tick.price,
+      volume: tick.volume,
       timestamp: tick.timestamp.toISOString()
     });
 

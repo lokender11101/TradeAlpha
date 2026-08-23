@@ -50,6 +50,7 @@ import { MarketController } from './controllers/market.controller';
 app.post('/api/orders', requireCsrfToken, authenticateJWT, OrderController.placeOrder);
 app.get('/api/orders', authenticateJWT, OrderController.getOrders);
 app.get('/api/market/status', MarketController.getStatus);
+app.get('/api/market/candles', MarketController.getCandles);
 app.delete('/api/orders/:id', requireCsrfToken, authenticateJWT, OrderController.cancelOrder);
 // Portfolio Routes
 app.get('/api/portfolios/:portfolioId', authenticateJWT, PortfolioController.getPortfolio);

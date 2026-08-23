@@ -52,9 +52,9 @@ export class WebSocketServer {
   private setupRedisBridging() {
     // The subClient is already used by Socket.io adapter, so we use a separate one for psubscribe
     const bridgeSubClient = this.pubClient.duplicate();
-    bridgeSubClient.psubscribe('market:tick:*', (err, count) => {
+    bridgeSubClient.psubscribe('market:tick:*', 'market:candle:*', (err, count) => {
       if (err) {
-        logger.error({ err }, 'Failed to psubscribe to market:tick:*');
+        logger.error({ err }, 'Failed to psubscribe to market events');
       } else {
         logger.info(`Bridging WebSocket to Redis PubSub. Subscribed to ${count} patterns.`);
       }
@@ -64,14 +64,20 @@ export class WebSocketServer {
       if (pattern === 'market:tick:*') {
         try {
           const payload = JSON.parse(message);
-          const symbol = payload.symbol;
-          if (symbol) {
-            const room = `market:${symbol}`;
-            logger.info({ symbol, room, channel }, 'Bridging tick to WebSocket room');
+          if (payload.symbol) {
             this.io.emit('market:tick', payload);
           }
         } catch (e) {
-          logger.error({ err: e }, 'Failed to parse market tick message');
+          logger.warn({ err: e }, 'Failed to parse market tick payload');
+        }
+      } else if (pattern === 'market:candle:*') {
+        try {
+          const payload = JSON.parse(message);
+          if (payload.payload?.symbol) {
+            this.io.emit('MARKET_CANDLE', payload);
+          }
+        } catch (e) {
+          logger.warn({ err: e }, 'Failed to parse market candle payload');
         }
       }
     });
