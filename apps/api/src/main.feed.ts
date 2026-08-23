@@ -113,6 +113,10 @@ class FeedLeaseService {
   }
 
   private startSimulations(): void {
+    if (process.env.DISABLE_MARKET_SIMULATOR === 'true') {
+      logger.info('[FeedLeaseService] Market Simulator disabled via env.');
+      return;
+    }
     if (!defaultMarketSessionService.isOpen()) {
       logger.info('[FeedLeaseService] Market is CLOSED. Not starting simulations.');
       return;

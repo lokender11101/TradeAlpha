@@ -43,8 +43,21 @@ test.describe('Terminal E2E', () => {
     await expect(page.locator('h3', { hasText: 'Chart - RELIANCE' })).toBeVisible();
     
     // 4. Observe live price (ensure WebSocket is connected and streaming)
+    // Deterministically trigger the execution by publishing a tick to Redis early
+    const initRedis = new Redis('redis://localhost:6379');
     const priceElement = page.getByTestId('live-price');
-    await expect(priceElement).not.toHaveText('---', { timeout: 15000 });
+    
+    await expect(async () => {
+      await initRedis.publish('market:tick:RELIANCE', JSON.stringify({
+        symbol: 'RELIANCE',
+        price: 150.00,
+        timestamp: '2026-08-15T06:30:00.000Z'
+      }));
+      await expect(priceElement).not.toHaveText('---', { timeout: 1000 });
+    }).toPass({ timeout: 15000, intervals: [500] });
+    
+    await initRedis.quit();
+    
     const initialPriceText = await priceElement.innerText();
     expect(parseFloat(initialPriceText)).toBeGreaterThan(0);
 
@@ -68,13 +81,16 @@ test.describe('Terminal E2E', () => {
     await page.click('button:has-text("Place BUY Order")');
 
     // Deterministically trigger the execution by publishing a tick to Redis
-    // using the top level import Redis
+    // using the top level import Redis. We loop to ensure TradingEngine processes it.
     const redis = new Redis('redis://localhost:6379');
-    await redis.publish('market:tick:RELIANCE', JSON.stringify({
-      symbol: 'RELIANCE',
-      price: 150.00,
-      timestamp: new Date().toISOString()
-    }));
+    for (let i = 0; i < 5; i++) {
+      await redis.publish('market:tick:RELIANCE', JSON.stringify({
+        symbol: 'RELIANCE',
+        price: 150.00,
+        timestamp: '2026-08-15T06:30:00.000Z'
+      }));
+      await page.waitForTimeout(500);
+    }
     await redis.quit();
 
     // Wait for the MARKET order to be FILLED (it should disappear from Open Orders)
@@ -95,6 +111,17 @@ test.describe('Terminal E2E', () => {
     // Reconnect should happen automatically, and we should see price updates again
     await page.click('a[href="/terminal"]');
     await page.waitForURL('/terminal');
-    await expect(page.getByTestId('live-price')).not.toHaveText('---', { timeout: 15000 });
+    
+    const reconnectRedis = new Redis('redis://localhost:6379');
+    const newPriceElement = page.getByTestId('live-price');
+    await expect(async () => {
+      await reconnectRedis.publish('market:tick:RELIANCE', JSON.stringify({
+        symbol: 'RELIANCE',
+        price: 155.00,
+        timestamp: '2026-08-15T06:30:00.000Z'
+      }));
+      await expect(newPriceElement).not.toHaveText('---', { timeout: 1000 });
+    }).toPass({ timeout: 15000, intervals: [500] });
+    await reconnectRedis.quit();
   });
 });

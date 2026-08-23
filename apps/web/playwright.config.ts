@@ -76,5 +76,9 @@ export default defineConfig({
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
+    env: {
+      MOCK_TIME: 'true',
+      DISABLE_MARKET_SIMULATOR: 'true',
+    }
   },
 });
