@@ -316,10 +316,10 @@ export class OrderService {
 
         await tx.outboxEvent.create({
           data: { 
-            type: 'ORDER_FILLED', 
+            type: newState === OrderStatus.FILLED ? 'ORDER_FILLED' : 'ORDER_PARTIALLY_FILLED', 
             aggregateType: 'Order',
             aggregateId: order.id,
-            payload: createEnvelope('ORDER_FILLED', { orderId: order.id, fillIdempotencyKey: dto.fillIdempotencyKey, portfolioId: order.portfolioId }) 
+            payload: createEnvelope(newState === OrderStatus.FILLED ? 'ORDER_FILLED' : 'ORDER_PARTIALLY_FILLED', { orderId: order.id, symbol: order.symbol, fillIdempotencyKey: dto.fillIdempotencyKey, portfolioId: order.portfolioId }) 
           }
         });
 

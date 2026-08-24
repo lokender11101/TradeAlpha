@@ -64,10 +64,10 @@ export class MarketCandleService {
 
     const result: CandleResponse[] = [];
     for (const [groupKey, group] of grouped.entries()) {
-      let open = group[0].open;
+      const open = group[0].open;
       let high = group[0].high;
       let low = group[0].low;
-      let close = group[group.length - 1].close;
+      const close = group[group.length - 1].close;
       let volume = new Prisma.Decimal(0);
       let isClosed = true; // Assume true, override if any unclosed candle is the last one in the group
 
@@ -116,7 +116,7 @@ export class MarketCandleService {
     const minutesSinceStart = (hours * 60 + minutes) - (9 * 60 + 15);
     
     // Fallback if before 09:15 (should not happen for valid market hours)
-    let effMinutes = minutesSinceStart >= 0 ? minutesSinceStart : 0;
+    const effMinutes = minutesSinceStart >= 0 ? minutesSinceStart : 0;
     
     let bucketSize = 1;
     if (timeframe === '5m') bucketSize = 5;

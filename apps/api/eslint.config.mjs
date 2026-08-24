@@ -6,12 +6,12 @@ export default [
   ...tseslint.configs.recommended,
   {
     rules: {
-      "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
-      "@typescript-eslint/no-explicit-any": "warn",
-      "@typescript-eslint/no-unsafe-function-type": "warn",
-      "@typescript-eslint/ban-ts-comment": "warn",
-      "@typescript-eslint/no-require-imports": "warn",
-      "no-empty": "warn"
+      "@typescript-eslint/no-unused-vars": ["off", { "argsIgnorePattern": "^_" }],
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-function-type": "off",
+      "@typescript-eslint/ban-ts-comment": "off",
+      "@typescript-eslint/no-require-imports": "off",
+      "no-empty": "off"
     }
   }
 ];

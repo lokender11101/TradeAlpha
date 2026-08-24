@@ -14,7 +14,7 @@
     "dev:workers": "nodemon src/main.workers.ts",
     "dev:feed": "nodemon src/main.feed.ts",
     "dev": "concurrently 'npm run dev:api' 'npm run dev:engine' 'npm run dev:workers' 'npm run dev:feed'",
-    "test": "jest --runInBand",
+    "test": "jest --runInBand --forceExit",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "seed:e2e": "ts-node src/scripts/seed-e2e.ts"

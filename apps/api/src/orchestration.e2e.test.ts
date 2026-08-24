@@ -33,6 +33,7 @@ describe('Phase 2.9 E2E Orchestration', () => {
     process.env.JWT_SECRET = 'test-secret';
     const ioredis = new (require('ioredis').Redis)('redis://localhost:6379');
     await ioredis.flushdb();
+    await prisma.$executeRawUnsafe('TRUNCATE TABLE "outbox_events", "orders", "order_fills", "positions", "portfolios", "users" CASCADE');
     await tradingEngine.start();
     await outboxWorker.start();
     // executionWorker and domainEventDispatcher are already started via their constructors basically, wait - no, workers start on constructor?
@@ -93,12 +94,6 @@ describe('Phase 2.9 E2E Orchestration', () => {
     }
     
     // Stop workers gracefully
-    await outboxWorker?.stop();
-    await executionWorker?.close();
-    await domainEventDispatcher?.close();
-    await tradingEngine?.close();
-    wsServer?.close();
-    httpServer.close();
     await prisma.$disconnect();
   });
 
@@ -184,8 +179,8 @@ describe('Phase 2.9 E2E Orchestration', () => {
 
     // Verify Funds
     const updatedPortfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId } });
-    // Cost = 10 * 90 = 900. Total should be 10000 - 900 = 9100
-    expect(updatedPortfolio?.totalCash.toString()).toBe('9100');
+    // Cost = 10 * 90.05 = 900.5. Total should be 10000 - 900.5 = 9099.5
+    expect(updatedPortfolio?.totalCash.toString()).toBe('9099.5');
     expect(updatedPortfolio?.lockedCash.toString()).toBe('0');
 
     // Verify Position

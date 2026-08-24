@@ -24,6 +24,8 @@ describe('OHLCV Aggregator & Market Candle E2E', () => {
     subscriber = new Redis(redisUrl);
     candleService = new MarketCandleService(prisma);
     
+    await publisher.flushdb();
+    await prisma.$executeRawUnsafe('TRUNCATE TABLE "outbox_events", "orders", "order_fills", "positions", "portfolios", "users", "market_candles", "market_tick_receipts" CASCADE');
     await worker1.start();
     await worker2.start();
   });

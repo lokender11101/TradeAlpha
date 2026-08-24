@@ -39,6 +39,7 @@ async function waitForServer(url: string, timeout = 30000) {
 
 beforeAll(async () => {
   await redis.flushdb();
+    await prisma.$executeRawUnsafe('TRUNCATE TABLE "outbox_events", "orders", "order_fills", "positions", "portfolios", "users" CASCADE');
   
   // Create user
   const email = `dist-test-${Date.now()}@example.com`;
@@ -198,7 +199,10 @@ describe('Phase 4 Distributed E2E Test Suite', () => {
     // Execution Worker processes it and updates DB to FILLED.
     
     let filled = false;
+    const timeNow = new Date();
+    timeNow.setUTCHours(6, 15, 0, 0); // 11:45 IST
     for (let i = 0; i < 20; i++) {
+      await redis.publish(`market:tick:RELIANCE`, JSON.stringify({ symbol: 'RELIANCE', price: '150.00', timestamp: timeNow.toISOString() }));
       await wait(1000);
       const dbOrder = await prisma.order.findUnique({ where: { id: orderId } });
       if (dbOrder && dbOrder.status === 'FILLED') {

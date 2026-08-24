@@ -6,6 +6,8 @@ import pino from 'pino';
 import Redis from 'ioredis';
 import * as crypto from 'crypto';
 import { MarketTick } from '../services/market-simulator.service';
+import { defaultTimeProvider } from "../services/time.provider";
+import { getLiquidityProfile, calculateExecutablePrice } from './liquidity.config';
 
 const logger = pino({
   transport: {
@@ -20,6 +22,7 @@ interface EngineOrder {
   order: Order;
   state: EngineOrderState;
   correlationId?: string;
+  expectedFilledQuantity: string; // Used for QUEUED -> READY safety lock
 }
 
 const LUA_HEARTBEAT = `
@@ -267,11 +270,22 @@ export class TradingEngine {
     
     const existing = book.get(order.id);
     if (existing && existing.state === 'QUEUED') {
-      logger.debug({ orderId: order.id }, '[Engine] Ignoring addOrder because it is currently QUEUED');
+      const dbFilledQty = new Prisma.Decimal(order.filledQuantity);
+      const expectedQty = new Prisma.Decimal(existing.expectedFilledQuantity);
+      
+      if (dbFilledQty.lt(expectedQty)) {
+        logger.debug({ orderId: order.id, dbFilledQty: dbFilledQty.toString(), expectedQty: expectedQty.toString() }, '[Engine] Ignoring addOrder because DB state has not caught up to expected dispatched quantity');
+        return;
+      }
+      
+      logger.info({ orderId: order.id }, '[Engine] Order returned to READY after partial fill');
+      existing.order = order;
+      existing.state = 'READY';
+      if (correlationId) existing.correlationId = correlationId;
       return;
     }
 
-    book.set(order.id, { order, state: 'READY', correlationId });
+    book.set(order.id, { order, state: 'READY', correlationId, expectedFilledQuantity: order.filledQuantity.toString() });
     logger.info({ orderId: order.id, symbol: order.symbol, correlationId }, '[Engine] Order added/updated in memory');
   }
 
@@ -348,12 +362,13 @@ export class TradingEngine {
     }
   }
 
-  private async evaluateOrder(engineOrder: EngineOrder, tickPrice: Prisma.Decimal, tickTimestamp?: string): Promise<void> {
+    private async evaluateOrder(engineOrder: EngineOrder, tickPrice: Prisma.Decimal, tickTimestamp?: string): Promise<void> {
     const { order } = engineOrder;
 
     // Fencing
     if (!this.ownedSymbols.has(order.symbol)) return;
 
+    // Trigger logic uses raw tickPrice
     if (order.type === OrderType.STOP) {
       const stopPrice = new Prisma.Decimal(order.stopPrice!);
       const triggered = (order.side === OrderSide.BUY && tickPrice.gte(stopPrice)) ||
@@ -390,9 +405,19 @@ export class TradingEngine {
         }
       }
       
+      // Now acts as LIMIT order, flow through to LIMIT evaluation below
+    }
+
+    const profile = getLiquidityProfile(order.symbol);
+    const filledQty = new Prisma.Decimal(order.filledQuantity);
+    const executablePrice = calculateExecutablePrice(order.side as OrderSide, tickPrice, profile, filledQty);
+
+    if (order.type === OrderType.LIMIT || order.type === OrderType.STOP_LIMIT) {
       const limitPrice = new Prisma.Decimal(order.limitPrice!);
-      const canFill = (order.side === OrderSide.BUY && tickPrice.lte(limitPrice)) ||
-                      (order.side === OrderSide.SELL && tickPrice.gte(limitPrice));
+      const canFill = (order.side === OrderSide.BUY && executablePrice.lte(limitPrice)) ||
+                      (order.side === OrderSide.SELL && executablePrice.gte(limitPrice));
+      
+      logger.info({ orderId: order.id, type: order.type, side: order.side, limitPrice: limitPrice.toString(), executablePrice: executablePrice.toString(), canFill }, '[Engine] LIMIT evaluation');
       
       if (canFill) {
         await this.triggerExecution(engineOrder, tickPrice, tickTimestamp);
@@ -402,16 +427,6 @@ export class TradingEngine {
 
     if (order.type === OrderType.MARKET) {
       await this.triggerExecution(engineOrder, tickPrice, tickTimestamp);
-      return;
-    }
-
-    if (order.type === OrderType.LIMIT) {
-      const limitPrice = new Prisma.Decimal(order.limitPrice!);
-      const canFill = (order.side === OrderSide.BUY && tickPrice.lte(limitPrice)) ||
-                      (order.side === OrderSide.SELL && tickPrice.gte(limitPrice));
-      if (canFill) {
-        await this.triggerExecution(engineOrder, tickPrice, tickTimestamp);
-      }
       return;
     }
   }
@@ -431,21 +446,30 @@ export class TradingEngine {
       return;
     }
 
+    const profile = getLiquidityProfile(order.symbol);
+    const executablePrice = calculateExecutablePrice(order.side as OrderSide, tickPrice, profile, filledQty);
+    
+    // Bounded by available depth for this level
+    const availableDepth = new Prisma.Decimal(profile.availableDepth);
+    const executableQty = Prisma.Decimal.min(remainingQty, availableDepth);
+
     engineOrder.state = 'QUEUED';
 
-    const resultingFilledQuantity = filledQty.add(remainingQty);
-    // Canonicalize string representation by parsing through Number or just stringifying the Decimal
-    const executionIdempotencyKey = `exec_${order.id}_${resultingFilledQuantity.toNumber()}`;
+    const resultingFilledQuantity = filledQty.add(executableQty);
+    engineOrder.expectedFilledQuantity = resultingFilledQuantity.toString();
+    
+    // Canonicalize string representation
+    const executionIdempotencyKey = `exec_${order.id}_${resultingFilledQuantity.toString()}`;
 
     await this.executionQueue.add(
       'EXECUTE_FILL',
       {
         orderId: order.id,
-        price: tickPrice.toString(), 
-        quantity: remainingQty.toString(), 
+        price: executablePrice.toString(), 
+        quantity: executableQty.toString(), 
         executionIdempotencyKey,
         correlationId: engineOrder.correlationId,
-        originTimestamp: tickTimestamp || new Date().toISOString()
+        originTimestamp: tickTimestamp || defaultTimeProvider.now().toISOString()
       },
       {
         jobId: executionIdempotencyKey, 
@@ -454,6 +478,7 @@ export class TradingEngine {
       }
     );
 
-    logger.info({ orderId: order.id, price: tickPrice.toString(), executionIdempotencyKey }, '[Engine] Queued EXECUTE_FILL job, state->QUEUED');
+    logger.info({ orderId: order.id, executablePrice: executablePrice.toString(), executableQty: executableQty.toString(), executionIdempotencyKey }, '[Engine] Queued EXECUTE_FILL job, state->QUEUED');
   }
+
 }

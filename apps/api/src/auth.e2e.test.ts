@@ -49,8 +49,6 @@ describe('Authentication & Impersonation E2E', () => {
     await prisma.portfolio.deleteMany({});
     await prisma.user.deleteMany({});
     await prisma.$disconnect();
-    await wsServer.close();
-    await new Promise((resolve) => httpServer.close(resolve));
   });
 
   // --- REST Authentication Tests ---

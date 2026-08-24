@@ -68,9 +68,10 @@ export class DomainEventDispatcherWorker {
           throw err;
         }
       }
-    } else if (['ORDER_FILLED', 'ORDER_REJECTED', 'ORDER_CANCELLED', 'ORDER_EXPIRED'].includes(type) && orderId) {
-      const symbol = typedPayload.symbol as string | undefined;
+    } else if (['ORDER_PARTIALLY_FILLED', 'ORDER_FILLED', 'ORDER_REJECTED', 'ORDER_CANCELLED', 'ORDER_EXPIRED'].includes(type) && orderId) {
+      const symbol = businessPayload.symbol as string | undefined;
       if (symbol) {
+        logger.info({ orderId, symbol, correlationId }, `[Dispatcher] Routed ${type} and published engine route`);
         await this.redis.publish(`engine:route:${symbol}`, JSON.stringify({ orderId, symbol }));
       }
     }
