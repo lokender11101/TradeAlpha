@@ -319,17 +319,30 @@ export class TradingEngine {
         }
         
         // Asynchronously hydrate from authoritative source
-        this.prisma.order.findUnique({ where: { id: payload.orderId } })
-          .then(order => {
-            if (order && this.ownedSymbols.has(order.symbol)) {
-               const requestedQty = new Prisma.Decimal(order.requestedQuantity);
-               const filledQty = new Prisma.Decimal(order.filledQuantity);
-               if (requestedQty.minus(filledQty).gt(0) && (order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED')) {
-                 this.addOrder(order, payload.correlationId, payload.metadata);
-               }
-            }
-          })
-          .catch(err => logger.error({ err, orderId: payload.orderId }, 'Failed to hydrate routed order'));
+        const parentMetadata = payload.metadata || {};
+        const tracer = trace.getTracer('tradealpha');
+        const spanContext = propagation.extract(context.active(), parentMetadata);
+        
+        context.with(spanContext, () => {
+          tracer.startActiveSpan('Engine Consume Route', { kind: SpanKind.CONSUMER }, (span) => {
+            span.setAttribute('order.id', payload.orderId);
+            this.prisma.order.findUnique({ where: { id: payload.orderId } })
+              .then(order => {
+                if (order && this.ownedSymbols.has(order.symbol)) {
+                  const requestedQty = new Prisma.Decimal(order.requestedQuantity);
+                  const filledQty = new Prisma.Decimal(order.filledQuantity);
+                  if (requestedQty.minus(filledQty).gt(0) && (order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED')) {
+                    this.addOrder(order, payload.correlationId, payload.metadata);
+                  }
+                }
+              })
+              .catch(err => {
+                span.recordException(err);
+                logger.error({ err, orderId: payload.orderId }, 'Failed to hydrate routed order');
+              })
+              .finally(() => span.end());
+          });
+        });
       } catch (err) {
         logger.error({ err }, 'Failed to parse pubsub route');
       }
@@ -471,6 +484,9 @@ export class TradingEngine {
     // Canonicalize string representation
     const executionIdempotencyKey = `exec_${order.id}_${resultingFilledQuantity.toString()}`;
 
+    const injectedMetadata: Record<string, string> = {};
+    propagation.inject(context.active(), injectedMetadata);
+
     await this.executionQueue.add(
       'EXECUTE_FILL',
       {
@@ -479,7 +495,7 @@ export class TradingEngine {
         quantity: executableQty.toString(), 
         executionIdempotencyKey,
         correlationId: engineOrder.correlationId,
-        metadata: engineOrder.metadata,
+        metadata: injectedMetadata,
         originTimestamp: tickTimestamp || defaultTimeProvider.now().toISOString()
       },
       {

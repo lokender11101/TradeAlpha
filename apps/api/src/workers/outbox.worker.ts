@@ -3,7 +3,7 @@ import { Queue } from 'bullmq';
 import pino from 'pino';
 import Redis from 'ioredis';
 import { runInTrace } from '../utils/telemetry-utils';
-import { SpanKind } from '@opentelemetry/api';
+import { SpanKind, propagation, context } from '@opentelemetry/api';
 
 const logger = pino({
   transport: {
@@ -87,45 +87,56 @@ export class OutboxWorker {
 
     // 2. Process events outside of any database transaction.
     for (const event of events) {
+      const parentMetadata = (event.payload as any)?.metadata || {};
       try {
-        // Publish to BullMQ using event.id to natively deduplicate pending/active jobs
-        await this.queue.add(
-          event.type,
-          {
-            eventId: event.id,
-            type: event.type,
-            aggregateType: event.aggregateType,
-            aggregateId: event.aggregateId,
-            payload: event.payload
-          },
-          {
-            jobId: event.id,
-            attempts: 3,
-            backoff: { type: 'exponential', delay: 1000 }
-          }
-        );
+        await runInTrace('OutboxWorker processEvent', parentMetadata, SpanKind.PRODUCER, async () => {
+          const injectedMetadata: Record<string, string> = {};
+          propagation.inject(context.active(), injectedMetadata);
 
-        // 3. Mark as PUBLISHED (Acknowledged)
-        await this.prisma.$executeRaw`
-          UPDATE outbox_events 
-          SET status = 'PUBLISHED'::"EventStatus", published_at = NOW(), error = NULL
-          WHERE id = ${event.id}
-        `;
+          const payloadWithMetadata = {
+            ...(event.payload as any || {}),
+            metadata: injectedMetadata
+          };
 
-        logger.info({ eventId: event.id, eventType: event.type, aggregateId: event.aggregateId }, 'Event published successfully');
-        processedCount++;
-        } catch (error: unknown) {
-          const attempts = event.attempts + 1;
-          const isPermanentlyFailed = attempts >= this.MAX_RETRIES;
-          
-          let nextRetryAt = null;
-          if (!isPermanentlyFailed) {
-            // Exponential backoff: 2^attempts seconds
-            const delayMs = Math.pow(2, attempts) * 1000;
-            nextRetryAt = new Date(Date.now() + delayMs);
-          }
+          // Publish to BullMQ using event.id to natively deduplicate pending/active jobs
+          await this.queue.add(
+            event.type,
+            {
+              eventId: event.id,
+              type: event.type,
+              aggregateType: event.aggregateType,
+              aggregateId: event.aggregateId,
+              payload: payloadWithMetadata
+            },
+            {
+              jobId: event.id,
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 1000 }
+            }
+          );
 
-          // 4. Mark as FAILED or schedule specific retry
+          // 3. Mark as PUBLISHED (Acknowledged)
+          await this.prisma.$executeRaw`
+            UPDATE outbox_events 
+            SET status = 'PUBLISHED'::"EventStatus", published_at = NOW(), error = NULL
+            WHERE id = ${event.id}
+          `;
+
+          logger.info({ eventId: event.id, eventType: event.type, aggregateId: event.aggregateId }, 'Event published successfully');
+          processedCount++;
+        });
+      } catch (error: any) {
+        const attempts = event.attempts + 1;
+        const isPermanentlyFailed = attempts >= this.MAX_RETRIES;
+        
+        let nextRetryAt = null;
+        if (!isPermanentlyFailed) {
+          // Exponential backoff: 2^attempts seconds
+          const delayMs = Math.pow(2, attempts) * 1000;
+          nextRetryAt = new Date(Date.now() + delayMs);
+        }
+
+        // 4. Mark as FAILED or schedule specific retry
         await this.prisma.$executeRaw`
           UPDATE outbox_events 
           SET status = 'FAILED'::"EventStatus", attempts = ${attempts}, next_retry_at = ${nextRetryAt}, error = ${error instanceof Error ? error.message : 'Unknown error'}

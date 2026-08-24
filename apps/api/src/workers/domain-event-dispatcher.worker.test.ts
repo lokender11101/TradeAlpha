@@ -60,7 +60,8 @@ describe('DomainEventDispatcherWorker', () => {
     await (worker as any).processJob(job);
 
     expect(mockOrderService.markOrderPending).toHaveBeenCalledWith('order-1');
-    expect(mockRedis.publish).toHaveBeenCalledWith('engine:route:AAPL', JSON.stringify({ orderId: 'order-1', symbol: 'AAPL', correlationId: 'system' }));
+    expect(mockRedis.publish).toHaveBeenCalledWith('engine:route:AAPL', expect.stringContaining('"orderId":"order-1"'));
+    expect(mockRedis.publish).toHaveBeenCalledWith('engine:route:AAPL', expect.stringContaining('"symbol":"AAPL"'));
     expect(mockEmit).toHaveBeenCalledWith('ORDER_ACCEPTED', expect.objectContaining({ eventId: 'event-1' }));
   });
 
@@ -108,7 +109,8 @@ describe('DomainEventDispatcherWorker', () => {
 
       await (worker as any).processJob(job);
 
-      expect(mockRedis.publish).toHaveBeenCalledWith('engine:route:AAPL', JSON.stringify({ orderId: 'order-1', symbol: 'AAPL' }));
+      expect(mockRedis.publish).toHaveBeenCalledWith('engine:route:AAPL', expect.stringContaining('"orderId":"order-1"'));
+      expect(mockRedis.publish).toHaveBeenCalledWith('engine:route:AAPL', expect.stringContaining('"symbol":"AAPL"'));
       expect(mockEmit).toHaveBeenCalledWith(type, expect.objectContaining({ eventId: `event-${type}` }));
     }
   });

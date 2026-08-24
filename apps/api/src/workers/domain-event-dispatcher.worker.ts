@@ -4,6 +4,8 @@ import Redis from 'ioredis';
 import pino from 'pino';
 import { EventEnvelope } from '../websocket';
 import { OrderService } from '../services/order.service';
+import { runInTrace } from '../utils/telemetry-utils';
+import { SpanKind, propagation, context, trace } from '@opentelemetry/api';
 const logger = pino({
   transport: {
     target: 'pino-pretty',
@@ -49,52 +51,71 @@ export class DomainEventDispatcherWorker {
     }
 
     const typedPayload = payload as Record<string, unknown>;
-    const correlationId = typedPayload.correlationId as string || 'system';
-    const businessPayload = typedPayload.payload as Record<string, unknown> || typedPayload;
-    
-    const orderId = businessPayload.orderId as string | undefined;
+    const parentMetadata = (typedPayload.metadata as Record<string, string>) || {};
 
-    // 1. Specific routing logic
-    if (type === 'ORDER_ACCEPTED' && orderId) {
-      try {
-        const order = await this.orderService.markOrderPending(orderId);
-        await this.redis.publish(`engine:route:${order.symbol}`, JSON.stringify({ orderId: order.id, symbol: order.symbol, correlationId }));
-        logger.info({ orderId, symbol: order.symbol, correlationId }, '[Dispatcher] Routed ORDER_ACCEPTED to PENDING and published engine route');
-      } catch (err: unknown) {
-        if (err instanceof Error && err.message.includes('Invalid state transition')) {
-          // Idempotent recovery: already pending or further along.
-          logger.info({ orderId }, '[Dispatcher] Order already processed past ACCEPTED. Silently ignoring duplicate routing.');
-        } else {
-          throw err;
+    return runInTrace('DomainDispatcher processJob', parentMetadata, SpanKind.CONSUMER, async () => {
+      const correlationId = typedPayload.correlationId as string || 'system';
+      const businessPayload = typedPayload.payload as Record<string, unknown> || typedPayload;
+      
+      const orderId = businessPayload.orderId as string | undefined;
+
+      const injectedMetadata: Record<string, string> = {};
+      propagation.inject(context.active(), injectedMetadata);
+
+      // 1. Specific routing logic
+      if (type === 'ORDER_ACCEPTED' && orderId) {
+        try {
+          const order = await this.orderService.markOrderPending(orderId);
+          await this.redis.publish(`engine:route:${order.symbol}`, JSON.stringify({ orderId: order.id, symbol: order.symbol, correlationId, metadata: injectedMetadata }));
+          logger.info({ orderId, symbol: order.symbol, correlationId }, '[Dispatcher] Routed ORDER_ACCEPTED to PENDING and published engine route');
+        } catch (err: unknown) {
+          if (err instanceof Error && err.message.includes('Invalid state transition')) {
+            // Idempotent recovery: already pending or further along.
+            logger.info({ orderId }, '[Dispatcher] Order already processed past ACCEPTED. Silently ignoring duplicate routing.');
+          } else {
+            throw err;
+          }
+        }
+      } else if (['ORDER_PARTIALLY_FILLED', 'ORDER_FILLED', 'ORDER_REJECTED', 'ORDER_CANCELLED', 'ORDER_EXPIRED'].includes(type) && orderId) {
+        const symbol = businessPayload.symbol as string | undefined;
+        if (symbol) {
+          logger.info({ orderId, symbol, correlationId }, `[Dispatcher] Routed ${type} and published engine route`);
+          await this.redis.publish(`engine:route:${symbol}`, JSON.stringify({ orderId, symbol, correlationId, metadata: injectedMetadata }));
         }
       }
-    } else if (['ORDER_PARTIALLY_FILLED', 'ORDER_FILLED', 'ORDER_REJECTED', 'ORDER_CANCELLED', 'ORDER_EXPIRED'].includes(type) && orderId) {
-      const symbol = businessPayload.symbol as string | undefined;
-      if (symbol) {
-        logger.info({ orderId, symbol, correlationId }, `[Dispatcher] Routed ${type} and published engine route`);
-        await this.redis.publish(`engine:route:${symbol}`, JSON.stringify({ orderId, symbol }));
-      }
-    }
 
-    // 2. Broadcast to WebSockets
-    const portfolioId = businessPayload.portfolioId as string;
-    
-    if (portfolioId) {
-      const envelope: EventEnvelope = {
-        eventId,
-        type,
-        timestamp: new Date().toISOString(),
-        payload: businessPayload
-      };
+      // 2. Broadcast to WebSockets
+      const portfolioId = businessPayload.portfolioId as string;
+      
+      if (portfolioId) {
+        const envelope: EventEnvelope = {
+          eventId,
+          type,
+          timestamp: new Date().toISOString(),
+          payload: businessPayload
+        };
 
-      try {
-        this.emitter.to(`portfolio:${portfolioId}`).emit(type, envelope);
-        logger.info({ eventId, type, portfolioId }, 'Broadcasted domain event to WebSocket room');
-      } catch (error) {
-        logger.error({ err: error, eventId }, 'Failed to emit WebSocket event');
-        throw error;
+        try {
+          const tracer = trace.getTracer('tradealpha');
+          await tracer.startActiveSpan(`Socket.IO Emit ${type}`, { kind: SpanKind.PRODUCER }, async (emitSpan) => {
+            try {
+              emitSpan.setAttribute('socket.room', `portfolio:${portfolioId}`);
+              emitSpan.setAttribute('event.type', type);
+              this.emitter.to(`portfolio:${portfolioId}`).emit(type, envelope);
+              logger.info({ eventId, type, portfolioId }, 'Broadcasted domain event to WebSocket room');
+            } catch (err: any) {
+              emitSpan.recordException(err);
+              throw err;
+            } finally {
+              emitSpan.end();
+            }
+          });
+        } catch (error: any) {
+          logger.error({ err: error, eventId }, 'Failed to emit WebSocket event');
+          throw error;
+        }
       }
-    }
+    });
   }
 
   public async close(): Promise<void> {

@@ -434,7 +434,7 @@ describe('Phase 6.3 Execution Realism E2E', () => {
   it('8. Session Fence Edge Cases (Worker Rejection)', async () => {
     // Manually add an EXECUTE_FILL job to executionWorker queue with an invalid originTimestamp
     const { Queue } = require('bullmq');
-    const q = new Queue('execution', { connection: redis });
+    const q = new Queue('tradealpha-execution', { connection: redis });
     const orderId = crypto.randomUUID();
     await prisma.order.create({
       data: {
