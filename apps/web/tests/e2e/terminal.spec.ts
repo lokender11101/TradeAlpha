@@ -30,7 +30,7 @@ test.describe('Terminal E2E', () => {
     await expect(page.locator('h1', { hasText: 'Portfolio Dashboard' })).toBeVisible();
 
     // Verify portfolio exists
-    await expect(page.getByRole('heading', { name: 'Total Value' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Total Cash' })).toBeVisible();
 
     // 2. Navigate to Terminal
     await page.click('a[href="/terminal"]');

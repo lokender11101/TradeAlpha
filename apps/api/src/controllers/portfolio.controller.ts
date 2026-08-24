@@ -1,12 +1,14 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { PriceCacheService } from '../services/price-cache.service';
+import { PortfolioValuationService } from '../services/portfolio-valuation.service';
 import Redis from 'ioredis';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 
 const prisma = new PrismaClient();
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', { maxRetriesPerRequest: null });
 const priceCache = new PriceCacheService(redis);
+const valuationService = new PortfolioValuationService(prisma, priceCache);
 
 export class PortfolioController {
   static async getPortfolio(req: AuthenticatedRequest, res: Response) {
@@ -25,7 +27,13 @@ export class PortfolioController {
         return res.status(403).json({ error: 'Forbidden' });
       }
       
-      res.status(200).json(portfolio);
+      const valuation = await valuationService.getValuation(portfolio.id);
+      
+      res.status(200).json({
+        id: portfolio.id,
+        userId: portfolio.userId,
+        ...valuation
+      });
     } catch (error) {
       res.status(500).json({ error: 'Internal Server Error' });
     }
