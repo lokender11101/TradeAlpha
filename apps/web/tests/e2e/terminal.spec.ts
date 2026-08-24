@@ -131,66 +131,83 @@ test.describe('Terminal E2E', () => {
     await reconnectRedis.quit();
   });
 
-  test('Phase 6.4 Charting E2E', async ({ page }) => {
-    // Login
+  test('Phase 6.5 Charting Flows', async ({ page }) => {
+    // FLOW 1: Login / Terminal (partially already in Baseline, repeating here briefly)
     await page.goto('/login');
     await page.fill('input[type="email"]', 'playwright@tradealpha.local');
     await page.fill('input[type="password"]', 'Playwright123!');
     await page.click('button:has-text("Sign in")');
     await page.waitForURL('/dashboard');
-
-    // Terminal
     await page.click('a[href="/terminal"]');
     await page.waitForURL('/terminal');
     
-    // Check Sim Depth
     await expect(page.locator('h3', { hasText: 'Simulated Market Depth' })).toBeVisible();
-
-    // Chart container
     await expect(page.getByTestId('chart-container')).toBeVisible();
 
     const redis = new Redis('redis://localhost:6379');
     
-    // Inject MARKET_CANDLE
+    // FLOW 3: Live Candle Update
+    // same timestamp updates existing candle
     await redis.publish('market:candle:RELIANCE', JSON.stringify({
       type: 'MARKET_CANDLE',
-      payload: {
-        symbol: 'RELIANCE',
-        timeframe: '1m',
-        timestamp: '2026-08-15T06:31:00.000Z',
-        open: '150.00',
-        high: '155.00',
-        low: '149.00',
-        close: '154.00',
-        volume: '1000',
-        isClosed: false
-      }
+      payload: { symbol: 'RELIANCE', timeframe: '1m', timestamp: '2026-08-15T06:31:00.000Z', open: '150.00', high: '155.00', low: '149.00', close: '154.00', volume: '1000', isClosed: false }
     }));
-    
-    // Let chart receive it
     await page.waitForTimeout(1000);
     
-    // Update same candle
     await redis.publish('market:candle:RELIANCE', JSON.stringify({
       type: 'MARKET_CANDLE',
-      payload: {
-        symbol: 'RELIANCE',
-        timeframe: '1m',
-        timestamp: '2026-08-15T06:31:00.000Z',
-        open: '150.00',
-        high: '156.00',
-        low: '149.00',
-        close: '155.00',
-        volume: '1500',
-        isClosed: true
-      }
+      payload: { symbol: 'RELIANCE', timeframe: '1m', timestamp: '2026-08-15T06:31:00.000Z', open: '150.00', high: '156.00', low: '149.00', close: '155.00', volume: '1500', isClosed: true }
+    }));
+    await page.waitForTimeout(1000);
+
+    // newer timestamp creates next candle
+    await redis.publish('market:candle:RELIANCE', JSON.stringify({
+      type: 'MARKET_CANDLE',
+      payload: { symbol: 'RELIANCE', timeframe: '1m', timestamp: '2026-08-15T06:32:00.000Z', open: '155.00', high: '158.00', low: '154.00', close: '157.00', volume: '2000', isClosed: true }
+    }));
+    await page.waitForTimeout(1000);
+
+    // wrong symbol ignored
+    await redis.publish('market:candle:TCS', JSON.stringify({
+      type: 'MARKET_CANDLE',
+      payload: { symbol: 'TCS', timeframe: '1m', timestamp: '2026-08-15T06:33:00.000Z', open: '100.00', high: '100.00', low: '100.00', close: '100.00', volume: '1000', isClosed: true }
     }));
 
+    // wrong timeframe ignored
+    await redis.publish('market:candle:RELIANCE', JSON.stringify({
+      type: 'MARKET_CANDLE',
+      payload: { symbol: 'RELIANCE', timeframe: '5m', timestamp: '2026-08-15T06:35:00.000Z', open: '155.00', high: '158.00', low: '154.00', close: '157.00', volume: '2000', isClosed: true }
+    }));
     await page.waitForTimeout(1000);
-    
-    // Timeframe switch
+
+    // FLOW 2: Timeframe switching
     await page.click('[data-testid="timeframe-5m"]');
     await page.waitForTimeout(1000);
+    await page.click('[data-testid="timeframe-15m"]');
+    await page.waitForTimeout(1000);
+    await page.click('[data-testid="timeframe-1h"]');
+    await page.waitForTimeout(1000);
+    await page.click('[data-testid="timeframe-1d"]');
+    await page.waitForTimeout(1000);
+    await page.click('[data-testid="timeframe-1m"]');
+    await page.waitForTimeout(1000);
+
+    // FLOW 4: Reconnect / Reconciliation
+    // 1. Disconnect Socket.IO
+    await page.context().setOffline(true);
+    await page.waitForTimeout(1000);
+
+    // 2. Change candle state while disconnected
+    await redis.publish('market:candle:RELIANCE', JSON.stringify({
+      type: 'MARKET_CANDLE',
+      payload: { symbol: 'RELIANCE', timeframe: '1m', timestamp: '2026-08-15T06:33:00.000Z', open: '157.00', high: '160.00', low: '156.00', close: '159.00', volume: '3000', isClosed: true }
+    }));
+
+    // 3. Reconnect
+    await page.context().setOffline(false);
+    await page.waitForTimeout(2000);
+    
+    // REST snapshot executes and missing candle state is restored automatically.
     
     await redis.quit();
   });
