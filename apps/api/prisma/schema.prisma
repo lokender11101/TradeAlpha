@@ -29,6 +29,8 @@ model Portfolio {
   orders     Order[]
   user       User       @relation(fields: [userId], references: [id])
   positions  Position[]
+  snapshots  PortfolioSnapshot[]
+
 
   @@map("portfolios")
 }
@@ -194,4 +196,23 @@ model MarketCandle {
   @@unique([symbol, timeframe, timestamp])
   @@index([symbol, timeframe, timestamp(sort: Desc)])
   @@map("market_candles")
+}
+
+model PortfolioSnapshot {
+  id            String    @id @default(uuid())
+  portfolioId   String    @map("portfolio_id")
+  snapshotDate  DateTime  @map("snapshot_date") @db.Date
+  totalCash     Decimal   @map("total_cash") @db.Decimal(19, 4)
+  marketValue   Decimal   @map("market_value") @db.Decimal(19, 4)
+  totalNav      Decimal   @map("total_nav") @db.Decimal(19, 4)
+  unrealizedPnl Decimal   @map("unrealized_pnl") @db.Decimal(19, 4)
+  realizedPnl   Decimal   @map("realized_pnl") @db.Decimal(19, 4)
+  isStale       Boolean   @default(false) @map("is_stale")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  portfolio     Portfolio @relation(fields: [portfolioId], references: [id])
+
+  @@unique([portfolioId, snapshotDate])
+  @@index([portfolioId, snapshotDate(sort: Desc)])
+  @@map("portfolio_snapshots")
 }

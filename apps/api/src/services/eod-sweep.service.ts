@@ -8,6 +8,8 @@ import { defaultTimeProvider } from './time.provider';
 import { Emitter } from '@socket.io/redis-emitter';
 import { EventEnvelope } from '../websocket';
 import * as crypto from 'crypto';
+import { PortfolioValuationService } from './portfolio-valuation.service';
+import { PriceCacheService } from './price-cache.service';
 
 const logger = pino({
   transport: {
@@ -21,6 +23,8 @@ export class EodSweepService {
   private readonly prisma: PrismaClient;
   private readonly orderService: OrderService;
   private readonly emitter: Emitter;
+  private readonly priceCache: PriceCacheService;
+  private readonly valuationService: PortfolioValuationService;
   private interval?: NodeJS.Timeout;
 
   constructor(redisUrl: string, prisma: PrismaClient) {
@@ -28,10 +32,11 @@ export class EodSweepService {
     this.prisma = prisma;
     this.orderService = new OrderService(this.prisma);
     this.emitter = new Emitter(this.redis);
+    this.priceCache = new PriceCacheService(this.redis);
+    this.valuationService = new PortfolioValuationService(this.prisma, this.priceCache);
   }
 
   public start() {
-    // Check every second for the exact transition moment
     this.interval = setInterval(() => this.tick(), 1000);
     logger.info('[EodSweepService] Started EOD sweep watcher');
   }
@@ -44,17 +49,16 @@ export class EodSweepService {
     const now = defaultTimeProvider.now();
     const timeStr = formatInTimeZone(now, 'Asia/Kolkata', 'HH:mm:ss');
     
-    // Trigger exactly at 15:30:00
     if (timeStr === '15:30:00') {
       const dateStr = formatInTimeZone(now, 'Asia/Kolkata', 'yyyy-MM-dd');
       const leaseKey = `eod:sweep:global:${dateStr}`;
       
-      // Attempt to acquire distributed singleton lease
       const acquired = await this.redis.set(leaseKey, 'locked', 'EX', 60, 'NX');
       
       if (acquired) {
         logger.info('[EodSweepService] Acquired EOD sweep lease. Executing transition...');
         await this.executeSweep();
+        await this.snapshotPortfolios(now);
         this.emitSessionStatus('CLOSED');
       }
     } else if (timeStr === '09:15:00') {
@@ -71,7 +75,6 @@ export class EodSweepService {
 
   private async executeSweep() {
     try {
-      // Find all orders that are day orders and active
       const activeOrders = await this.prisma.order.findMany({
         where: {
           status: { in: [OrderStatus.ACCEPTED, OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED] }
@@ -96,6 +99,82 @@ export class EodSweepService {
     }
   }
 
+  public async snapshotPortfolios(now: Date) {
+    logger.info('[EodSweepService] Starting EOD portfolio snapshots...');
+    const startTime = Date.now();
+    const batchSize = 100;
+    
+    // Normalize date to midnight UTC for standard daily snapshots
+    const snapshotDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+    let processedCount = 0;
+    let failureCount = 0;
+    let dbQueryCount = 0;
+    let skip = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const portfolios = await this.prisma.portfolio.findMany({
+        select: { id: true },
+        take: batchSize,
+        skip: skip,
+        orderBy: { id: 'asc' }
+      });
+      dbQueryCount++;
+
+      if (portfolios.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      for (const p of portfolios) {
+        try {
+          // Idempotency check
+          const existing = await this.prisma.portfolioSnapshot.findUnique({
+            where: { portfolioId_snapshotDate: { portfolioId: p.id, snapshotDate } }
+          });
+          dbQueryCount++;
+
+          if (existing) {
+            processedCount++;
+            continue; // Skip if already captured
+          }
+
+          const val = await this.valuationService.getValuation(p.id);
+          dbQueryCount += 2; // Valuation does some querying (findUnique + get prices via redis)
+
+          await this.prisma.portfolioSnapshot.create({
+            data: {
+              portfolioId: p.id,
+              snapshotDate: snapshotDate,
+              totalCash: val.totalCash,
+              marketValue: val.marketValue,
+              totalNav: val.totalNav,
+              unrealizedPnl: val.unrealizedPnl,
+              realizedPnl: val.realizedPnl,
+              isStale: val.isStale
+            }
+          });
+          dbQueryCount++;
+          processedCount++;
+        } catch (error) {
+          logger.error({ error, portfolioId: p.id }, '[EodSweepService] Failed to snapshot portfolio');
+          failureCount++;
+        }
+      }
+
+      skip += batchSize;
+    }
+
+    const durationMs = Date.now() - startTime;
+    logger.info({
+      processedCount,
+      failureCount,
+      dbQueryCount,
+      durationMs
+    }, '[EodSweepService] EOD portfolio snapshots completed');
+  }
+
   private emitSessionStatus(status: 'OPEN' | 'CLOSED') {
     const envelope: EventEnvelope = {
       eventId: crypto.randomUUID(),
@@ -104,7 +183,6 @@ export class EodSweepService {
       payload: { status }
     };
     
-    // Broadcast to a global channel for all connected clients
     this.emitter.to('market:global').emit('SESSION_STATUS', envelope);
     logger.info({ status }, '[EodSweepService] Emitted global SESSION_STATUS');
   }
