@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { createChart, IChartApi, ISeriesApi, Time, CandlestickSeries } from 'lightweight-charts';
 import { useSocket } from '@/lib/socket-context';
 import { apiFetch } from '@/lib/api';
@@ -29,6 +29,7 @@ export function Chart({ symbol }: { symbol: string }) {
   const [timeframe, setTimeframe] = useState('1m');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [hasData, setHasData] = useState(false);
   
   // Single source of truth for chart data
   const dataMapRef = useRef<Map<number, CandleResponse>>(new Map());
@@ -83,6 +84,7 @@ export function Chart({ symbol }: { symbol: string }) {
       close: parseFloat(c.close),
     }));
     seriesRef.current.setData(chartData);
+    setHasData(dataMapRef.current.size > 0);
   };
 
   const mergeCandle = (candle: CandleResponse) => {
@@ -97,7 +99,7 @@ export function Chart({ symbol }: { symbol: string }) {
     return true;
   };
 
-  const fetchHistorical = async () => {
+  const fetchHistorical = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -119,14 +121,14 @@ export function Chart({ symbol }: { symbol: string }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [symbol, timeframe]);
 
   // Re-fetch on symbol/timeframe change
   useEffect(() => {
     dataMapRef.current.clear();
     flushToChart();
     fetchHistorical();
-  }, [symbol, timeframe]);
+  }, [symbol, timeframe, fetchHistorical]);
 
   // Re-fetch on reconnect
   useEffect(() => {
@@ -199,7 +201,7 @@ export function Chart({ symbol }: { symbol: string }) {
           </div>
         )}
         
-        {(!loading && !error && dataMapRef.current.size === 0) && (
+        {(!loading && !error && !hasData) && (
           <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
             <p className="text-muted-foreground">No historical data available</p>
           </div>

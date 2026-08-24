@@ -80,21 +80,27 @@ test.describe('Terminal E2E', () => {
     await page.fill('#qty', '5'); // Quantity
     await page.click('button:has-text("Place BUY Order")');
 
-    // Deterministically trigger the execution by publishing a tick to Redis
-    // using the top level import Redis. We loop to ensure TradingEngine processes it.
+    // Deterministically trigger the execution by publishing ticks to Redis
+    // We loop and poll until the order is actually filled, because Outbox Worker
+    // takes up to 2 seconds to route the order to the Trading Engine.
     const redis = new Redis('redis://localhost:6379');
-    for (let i = 0; i < 5; i++) {
+    
+    await expect.poll(async () => {
       await redis.publish('market:tick:RELIANCE', JSON.stringify({
         symbol: 'RELIANCE',
         price: 150.00,
         timestamp: '2026-08-15T06:30:00.000Z'
       }));
-      await page.waitForTimeout(500);
-    }
+      
+      // Check if it disappeared from Open Orders
+      const isVisible = await page.locator('td', { hasText: 'PENDING' }).first().isVisible();
+      return isVisible;
+    }, {
+      intervals: [1000],
+      timeout: 15000
+    }).toBeFalsy();
+    
     await redis.quit();
-
-    // Wait for the MARKET order to be FILLED (it should disappear from Open Orders)
-    await expect(page.locator('td', { hasText: 'PENDING' }).first()).toBeHidden({ timeout: 10000 });
 
     // 9. Portfolio / Position update
     // Go back to dashboard and check if positions are updated

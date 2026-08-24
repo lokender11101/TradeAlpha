@@ -1,8 +1,12 @@
 import request from 'supertest';
 import { PrismaClient, OrderStatus } from '@prisma/client';
 import { app, httpServer, wsServer } from './main.api';
-import { tradingEngine } from './main.engine';
-import { outboxWorker, executionWorker, domainEventDispatcher, ohlcvAggregator } from './main.workers';
+import { TradingEngine } from './engine/trading-engine';
+import { OrderService } from './services/order.service';
+import { PriceCacheService } from './services/price-cache.service';
+import { OutboxWorker } from './workers/outbox.worker';
+import { ExecutionWorker } from './workers/execution.worker';
+import { DomainEventDispatcherWorker } from './workers/domain-event-dispatcher.worker';
 
 import jwt from 'jsonwebtoken';
 import { defaultTimeProvider } from './services/time.provider';
@@ -15,6 +19,10 @@ describe('Phase 6.3 Execution Realism E2E', () => {
   let userId: string;
   let portfolioId: string;
   let redis: import('ioredis').Redis;
+  let tradingEngine: TradingEngine;
+  let outboxWorker: OutboxWorker;
+  let executionWorker: ExecutionWorker;
+  let domainEventDispatcher: DomainEventDispatcherWorker;
 
   beforeAll(async () => {
     // Override port to 0 for random available port to avoid conflicts
@@ -25,6 +33,13 @@ describe('Phase 6.3 Execution Realism E2E', () => {
     await redis.flushdb();
     await prisma.$executeRawUnsafe('TRUNCATE TABLE "outbox_events", "orders", "order_fills", "positions", "portfolios", "users" CASCADE');
     
+    const orderService = new OrderService(prisma);
+    const priceCacheService = new PriceCacheService(redis);
+    tradingEngine = new TradingEngine(process.env.REDIS_URL || 'redis://localhost:6379', prisma, orderService, priceCacheService, ['RELIANCE', 'TCS']);
+    outboxWorker = new OutboxWorker(prisma, process.env.REDIS_URL || 'redis://localhost:6379');
+    executionWorker = new ExecutionWorker(prisma, process.env.REDIS_URL || 'redis://localhost:6379');
+    domainEventDispatcher = new DomainEventDispatcherWorker(process.env.REDIS_URL || 'redis://localhost:6379', orderService);
+
     await tradingEngine.start();
     await outboxWorker.start(200);
     // executionWorker and domainEventDispatcher started
@@ -62,9 +77,14 @@ describe('Phase 6.3 Execution Realism E2E', () => {
   });
 
   afterAll(async () => {
+    await outboxWorker.stop();
+    await executionWorker.close();
+    await domainEventDispatcher.close();
+    await tradingEngine.close();
     await redis.quit();
     await prisma.$disconnect();
     delete process.env.MOCK_TIME;
+    delete process.env.JWT_SECRET;
   });
 
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));

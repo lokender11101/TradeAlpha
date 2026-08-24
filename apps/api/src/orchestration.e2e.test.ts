@@ -3,8 +3,12 @@ import { defaultTimeProvider } from "./services/time.provider";
 import request from 'supertest';
 import { PrismaClient, OrderStatus } from '@prisma/client';
 import { app, httpServer, wsServer } from './main.api';
-import { tradingEngine } from './main.engine';
-import { outboxWorker, executionWorker, domainEventDispatcher } from './main.workers';
+import { TradingEngine } from './engine/trading-engine';
+import { OrderService } from './services/order.service';
+import { PriceCacheService } from './services/price-cache.service';
+import { OutboxWorker } from './workers/outbox.worker';
+import { ExecutionWorker } from './workers/execution.worker';
+import { DomainEventDispatcherWorker } from './workers/domain-event-dispatcher.worker';
 import { FeedLeaseService } from './main.feed';
 
 import jwt from 'jsonwebtoken';
@@ -23,6 +27,10 @@ describe('Phase 2.9 E2E Orchestration', () => {
 
   let originalMockTime: string | undefined;
   let originalJwtSecret: string | undefined;
+  let tradingEngine: TradingEngine;
+  let outboxWorker: OutboxWorker;
+  let executionWorker: ExecutionWorker;
+  let domainEventDispatcher: DomainEventDispatcherWorker;
 
   beforeAll(async () => {
     originalMockTime = process.env.MOCK_TIME;
@@ -34,6 +42,12 @@ describe('Phase 2.9 E2E Orchestration', () => {
     const ioredis = new (require('ioredis').Redis)('redis://localhost:6379');
     await ioredis.flushdb();
     await prisma.$executeRawUnsafe('TRUNCATE TABLE "outbox_events", "orders", "order_fills", "positions", "portfolios", "users" CASCADE');
+    const orderService = new OrderService(prisma);
+    const priceCacheService = new PriceCacheService(ioredis);
+    tradingEngine = new TradingEngine(process.env.REDIS_URL || 'redis://localhost:6379', prisma, orderService, priceCacheService, ['RELIANCE', 'TCS']);
+    outboxWorker = new OutboxWorker(prisma, process.env.REDIS_URL || 'redis://localhost:6379');
+    executionWorker = new ExecutionWorker(prisma, process.env.REDIS_URL || 'redis://localhost:6379');
+    domainEventDispatcher = new DomainEventDispatcherWorker(process.env.REDIS_URL || 'redis://localhost:6379', orderService);
     await tradingEngine.start();
     await outboxWorker.start();
     // executionWorker and domainEventDispatcher are already started via their constructors basically, wait - no, workers start on constructor?
