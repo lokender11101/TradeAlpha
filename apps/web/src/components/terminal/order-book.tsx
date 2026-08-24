@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSocket } from '@/lib/socket-context';
+import { apiFetch } from '@/lib/api';
 
 interface OrderBookLevel {
   price: string;
@@ -9,23 +10,37 @@ interface OrderBookLevel {
   total: string;
 }
 
+interface ExecutionProfile {
+  symbol: string;
+  baseSpread: string;
+  availableDepth: string;
+  slippageFactor: string;
+}
+
 export function OrderBook({ symbol }: { symbol: string }) {
   const { socket, connected } = useSocket();
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+  const [profile, setProfile] = useState<ExecutionProfile | null>(null);
+
+  useEffect(() => {
+    apiFetch(`/market/execution-profile?symbol=${symbol}`)
+      .then(r => r.json())
+      .then(p => {
+        if (!p.error) setProfile(p);
+      })
+      .catch(console.error);
+  }, [symbol]);
 
   useEffect(() => {
     if (!socket || !connected) return;
 
     const handleTick = (tick: any) => {
-      console.log('Received tick:', tick);
       if (tick.symbol === symbol) {
         setCurrentPrice(parseFloat(tick.price));
       }
     };
 
     socket.on('market:tick', handleTick);
-    
-    // Subscribe to symbol if backend requires it (optional depending on implementation)
     socket.emit('join_market', symbol);
 
     return () => {
@@ -34,20 +49,23 @@ export function OrderBook({ symbol }: { symbol: string }) {
     };
   }, [socket, connected, symbol]);
 
-  // Generate simulated order book levels around current price
   const generateLevels = (price: number | null, isAsk: boolean): OrderBookLevel[] => {
-    if (!price) return Array(5).fill({ price: '-', size: '-', total: '-' });
+    if (!price || !profile) return Array(5).fill({ price: '-', size: '-', total: '-' });
     
     const levels: OrderBookLevel[] = [];
     let totalSize = 0;
     
+    const baseSpread = parseFloat(profile.baseSpread);
+    const slippage = parseFloat(profile.slippageFactor);
+    const depth = parseInt(profile.availableDepth, 10);
+    
     for (let i = 0; i < 5; i++) {
-      // Asks go up from price, Bids go down from price
-      const offset = (i + 1) * 0.05;
-      const levelPrice = isAsk ? price + offset : price - offset;
+      const spreadOffset = baseSpread / 2;
+      const slippageOffset = i * slippage;
+      const totalOffset = spreadOffset + slippageOffset;
+      const levelPrice = isAsk ? price + totalOffset : price - totalOffset;
       
-      // Random deterministic-ish size
-      const size = Math.floor(Math.abs(Math.sin(levelPrice * 100)) * 500) + 50;
+      const size = depth;
       totalSize += size;
       
       levels.push({
@@ -57,9 +75,6 @@ export function OrderBook({ symbol }: { symbol: string }) {
       });
     }
 
-    // Bids should be highest price first (i=0 is highest bid)
-    // Asks are usually displayed lowest price first (i=0 is lowest ask), 
-    // but in an order book, asks are often rendered top-down (highest ask at the top).
     if (isAsk) {
       return levels.reverse(); 
     }
@@ -72,7 +87,7 @@ export function OrderBook({ symbol }: { symbol: string }) {
 
   return (
     <div className="p-4 border rounded-xl bg-card text-card-foreground">
-      <h3 className="font-semibold text-lg mb-4">Order Book - {symbol}</h3>
+      <h3 className="font-semibold text-lg mb-4">Simulated Market Depth - {symbol}</h3>
       <div className="flex flex-col text-sm font-mono">
         <div className="grid grid-cols-3 text-muted-foreground pb-2 border-b">
           <div className="text-left">Price</div>
@@ -96,7 +111,9 @@ export function OrderBook({ symbol }: { symbol: string }) {
           <span data-testid="live-price" className={currentPrice ? 'text-primary' : 'text-muted-foreground'}>
             {currentPrice ? currentPrice.toFixed(2) : '---'}
           </span>
-          <span className="text-xs font-normal text-muted-foreground uppercase">Spread: 0.10</span>
+          <span className="text-xs font-normal text-muted-foreground uppercase">
+            Spread: {profile ? profile.baseSpread : '---'}
+          </span>
         </div>
 
         {/* Bids (Green) */}

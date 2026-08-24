@@ -51,6 +51,7 @@ app.post('/api/orders', requireCsrfToken, authenticateJWT, OrderController.place
 app.get('/api/orders', authenticateJWT, OrderController.getOrders);
 app.get('/api/market/status', MarketController.getStatus);
 app.get('/api/market/candles', MarketController.getCandles);
+app.get('/api/market/execution-profile', MarketController.getExecutionProfile);
 app.delete('/api/orders/:id', requireCsrfToken, authenticateJWT, OrderController.cancelOrder);
 // Portfolio Routes
 app.get('/api/portfolios/:portfolioId', authenticateJWT, PortfolioController.getPortfolio);

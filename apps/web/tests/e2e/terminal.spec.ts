@@ -124,4 +124,68 @@ test.describe('Terminal E2E', () => {
     }).toPass({ timeout: 15000, intervals: [500] });
     await reconnectRedis.quit();
   });
+
+  test('Phase 6.4 Charting E2E', async ({ page }) => {
+    // Login
+    await page.goto('/login');
+    await page.fill('input[type="email"]', 'playwright@tradealpha.local');
+    await page.fill('input[type="password"]', 'Playwright123!');
+    await page.click('button:has-text("Sign in")');
+    await page.waitForURL('/dashboard');
+
+    // Terminal
+    await page.click('a[href="/terminal"]');
+    await page.waitForURL('/terminal');
+    
+    // Check Sim Depth
+    await expect(page.locator('h3', { hasText: 'Simulated Market Depth' })).toBeVisible();
+
+    // Chart container
+    await expect(page.getByTestId('chart-container')).toBeVisible();
+
+    const redis = new Redis('redis://localhost:6379');
+    
+    // Inject MARKET_CANDLE
+    await redis.publish('market:candle:RELIANCE', JSON.stringify({
+      type: 'MARKET_CANDLE',
+      payload: {
+        symbol: 'RELIANCE',
+        timeframe: '1m',
+        timestamp: '2026-08-15T06:31:00.000Z',
+        open: '150.00',
+        high: '155.00',
+        low: '149.00',
+        close: '154.00',
+        volume: '1000',
+        isClosed: false
+      }
+    }));
+    
+    // Let chart receive it
+    await page.waitForTimeout(1000);
+    
+    // Update same candle
+    await redis.publish('market:candle:RELIANCE', JSON.stringify({
+      type: 'MARKET_CANDLE',
+      payload: {
+        symbol: 'RELIANCE',
+        timeframe: '1m',
+        timestamp: '2026-08-15T06:31:00.000Z',
+        open: '150.00',
+        high: '156.00',
+        low: '149.00',
+        close: '155.00',
+        volume: '1500',
+        isClosed: true
+      }
+    }));
+
+    await page.waitForTimeout(1000);
+    
+    // Timeframe switch
+    await page.click('[data-testid="timeframe-5m"]');
+    await page.waitForTimeout(1000);
+    
+    await redis.quit();
+  });
 });

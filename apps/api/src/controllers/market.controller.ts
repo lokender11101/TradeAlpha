@@ -1,3 +1,4 @@
+import { getLiquidityProfile } from '../engine/liquidity.config';
 import { Request, Response } from 'express';
 import { defaultMarketSessionService } from '../services/market-session.service';
 import { MarketCandleService, Timeframe } from '../services/market-candle.service';
@@ -37,6 +38,25 @@ export class MarketController {
       return res.status(200).json(candles);
     } catch (err) {
       return res.status(500).json({ error: 'Failed to fetch market candles' });
+    }
+  }
+
+  public static getExecutionProfile(req: Request, res: Response) {
+    try {
+      const { symbol } = req.query;
+      if (!symbol || typeof symbol !== 'string') {
+        return res.status(400).json({ error: 'Valid symbol is required' });
+      }
+
+      const profile = getLiquidityProfile(symbol);
+      return res.status(200).json({
+        symbol: profile.symbol,
+        baseSpread: profile.baseSpread,
+        availableDepth: profile.availableDepth,
+        slippageFactor: profile.slippageFactor
+      });
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to fetch execution profile' });
     }
   }
 }

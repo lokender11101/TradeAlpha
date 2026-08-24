@@ -7,6 +7,7 @@ import { OrderEntry } from '@/components/terminal/order-entry';
 import { OrderBook } from '@/components/terminal/order-book';
 import { RecentTrades } from '@/components/terminal/recent-trades';
 import { OpenOrders } from '@/components/dashboard/open-orders';
+import { Chart } from '@/components/terminal/chart';
 
 export default function TerminalPage() {
   const { user, loading } = useAuth();
@@ -53,10 +54,8 @@ export default function TerminalPage() {
       <div className="flex-1 grid gap-4 md:grid-cols-3 lg:grid-cols-4">
         {/* Main Chart Area */}
         <div className="rounded-xl border bg-card text-card-foreground shadow p-6 md:col-span-2 lg:col-span-2 flex flex-col">
-          <h3 className="font-semibold text-lg mb-4">Chart - {symbol}</h3>
-          <div className="flex-1 flex items-center justify-center bg-muted/20 border border-dashed rounded-lg">
-            <p className="text-muted-foreground">Chart Component placeholder</p>
-          </div>
+          
+          <Chart symbol={symbol} />
         </div>
         
         {/* Order Book */}
