@@ -1,0 +1,50 @@
+{
+  "title": "Trading Engine",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Active Symbols",
+      "type": "stat",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "tradealpha_engine_active_symbols",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Active Orders",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "tradealpha_engine_active_orders",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    }
+  ],
+  "schemaVersion": 30,
+  "timezone": "browser",
+  "refresh": "5s"
+}

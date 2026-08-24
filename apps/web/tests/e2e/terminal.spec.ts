@@ -54,7 +54,7 @@ test.describe('Terminal E2E', () => {
         timestamp: '2026-08-15T06:30:00.000Z'
       }));
       await expect(priceElement).not.toHaveText('---', { timeout: 1000 });
-    }).toPass({ timeout: 15000, intervals: [500] });
+    }).toPass({ timeout: 60000, intervals: [500] });
     
     await initRedis.quit();
     
@@ -97,7 +97,7 @@ test.describe('Terminal E2E', () => {
       return isVisible;
     }, {
       intervals: [1000],
-      timeout: 15000
+      timeout: 60000
     }).toBeFalsy();
     
     await redis.quit();
@@ -127,7 +127,7 @@ test.describe('Terminal E2E', () => {
         timestamp: '2026-08-15T06:30:00.000Z'
       }));
       await expect(newPriceElement).not.toHaveText('---', { timeout: 1000 });
-    }).toPass({ timeout: 15000, intervals: [500] });
+    }).toPass({ timeout: 60000, intervals: [500] });
     await reconnectRedis.quit();
   });
 

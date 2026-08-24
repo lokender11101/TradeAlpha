@@ -1,7 +1,11 @@
+import { setupTelemetry } from "./telemetry";
+setupTelemetry("tradealpha-api");
+
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import pino from 'pino';
+import { metricsRegistry } from './telemetry';
 import { createServer } from 'http';
 import { WebSocketServer } from './websocket';
 import { PrismaClient } from '@prisma/client';
@@ -34,6 +38,12 @@ import { correlationMiddleware } from './middlewares/correlation.middleware';
 app.use(correlationMiddleware);
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', metricsRegistry.contentType);
+  res.end(await metricsRegistry.metrics());
+});
+
 app.use(cookieParser());
 
 app.post('/api/auth/register', AuthController.register);

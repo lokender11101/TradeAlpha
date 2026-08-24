@@ -4,6 +4,7 @@ import { OrderService } from '../services/order.service';
 import { PriceCacheService } from '../services/price-cache.service';
 import pino from 'pino';
 import Redis from 'ioredis';
+import { trace, context, propagation, SpanKind } from '@opentelemetry/api';
 import * as crypto from 'crypto';
 import { MarketTick } from '../services/market-simulator.service';
 import { defaultTimeProvider } from "../services/time.provider";
@@ -23,6 +24,7 @@ interface EngineOrder {
   state: EngineOrderState;
   correlationId?: string;
   expectedFilledQuantity: string; // Used for QUEUED -> READY safety lock
+  metadata?: Record<string, string>;
 }
 
 const LUA_HEARTBEAT = `
@@ -259,7 +261,7 @@ export class TradingEngine {
     }
   }
 
-  private addOrder(order: Order, correlationId?: string): void {
+  private addOrder(order: Order, correlationId?: string, metadata?: Record<string, string>): void {
     if (!this.ownedSymbols.has(order.symbol)) return;
     
     let book = this.orders.get(order.symbol);
@@ -282,10 +284,11 @@ export class TradingEngine {
       existing.order = order;
       existing.state = 'READY';
       if (correlationId) existing.correlationId = correlationId;
+      if (metadata) existing.metadata = metadata;
       return;
     }
 
-    book.set(order.id, { order, state: 'READY', correlationId, expectedFilledQuantity: order.filledQuantity.toString() });
+    book.set(order.id, { order, state: 'READY', correlationId, expectedFilledQuantity: order.filledQuantity.toString(), metadata });
     logger.info({ orderId: order.id, symbol: order.symbol, correlationId }, '[Engine] Order added/updated in memory');
   }
 
@@ -322,7 +325,7 @@ export class TradingEngine {
                const requestedQty = new Prisma.Decimal(order.requestedQuantity);
                const filledQty = new Prisma.Decimal(order.filledQuantity);
                if (requestedQty.minus(filledQty).gt(0) && (order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED')) {
-                 this.addOrder(order, payload.correlationId);
+                 this.addOrder(order, payload.correlationId, payload.metadata);
                }
             }
           })
@@ -352,8 +355,15 @@ export class TradingEngine {
           if (!this.ownedSymbols.has(payload.symbol)) {
              return; 
           }
-          this.evaluateOrder(engineOrder, tickPrice, payload.timestamp).catch((err) => {
-             logger.error({err, orderId: engineOrder.order.id}, 'Error evaluating order');
+          const tracer = trace.getTracer('tradealpha');
+          const spanContext = engineOrder.metadata ? propagation.extract(context.active(), engineOrder.metadata) : context.active();
+          context.with(spanContext, () => {
+            tracer.startActiveSpan('Engine Evaluate Order', { kind: SpanKind.INTERNAL }, (span) => {
+              this.evaluateOrder(engineOrder, tickPrice, payload.timestamp).catch((err) => {
+                 span.recordException(err);
+                 logger.error({err, orderId: engineOrder.order.id}, 'Error evaluating order');
+              }).finally(() => span.end());
+            });
           });
         }
       } catch (err) {
@@ -469,6 +479,7 @@ export class TradingEngine {
         quantity: executableQty.toString(), 
         executionIdempotencyKey,
         correlationId: engineOrder.correlationId,
+        metadata: engineOrder.metadata,
         originTimestamp: tickTimestamp || defaultTimeProvider.now().toISOString()
       },
       {

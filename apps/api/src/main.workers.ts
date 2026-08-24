@@ -1,5 +1,10 @@
+import { setupTelemetry } from "./telemetry";
+setupTelemetry("tradealpha-workers");
+
 import dotenv from 'dotenv';
 import pino from 'pino';
+import express from 'express';
+import { metricsRegistry } from './telemetry';
 import { PrismaClient } from '@prisma/client';
 import { OutboxWorker } from './workers/outbox.worker';
 import { ExecutionWorker } from './workers/execution.worker';
@@ -64,3 +69,10 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 export { outboxWorker, executionWorker, domainEventDispatcher, eodSweepService, ohlcvAggregator };
+
+const metricsApp = express();
+metricsApp.get('/metrics', async (req, res) => {
+  res.set('Content-Type', metricsRegistry.contentType);
+  res.end(await metricsRegistry.metrics());
+});
+metricsApp.listen(4002, () => console.log('Metrics on port 4002'));

@@ -2,6 +2,8 @@ import { PrismaClient, OutboxEvent } from '@prisma/client';
 import { Queue } from 'bullmq';
 import pino from 'pino';
 import Redis from 'ioredis';
+import { runInTrace } from '../utils/telemetry-utils';
+import { SpanKind } from '@opentelemetry/api';
 
 const logger = pino({
   transport: {
@@ -61,6 +63,7 @@ export class OutboxWorker {
    * Public for testing. Normally invoked by the polling loop.
    */
   public async processOutbox(): Promise<number> {
+    return runInTrace('OutboxWorker process', undefined, SpanKind.INTERNAL, async () => {
     // 1. Claim pending or retryable events atomically with a single query (Lease Pattern).
     // This locks the rows, updates their next_retry_at to 1 minute in the future,
     // and returns them immediately, releasing the Postgres lock so we don't hold it during Redis I/O.
@@ -138,5 +141,6 @@ export class OutboxWorker {
     }
 
     return processedCount;
+    });
   }
 }

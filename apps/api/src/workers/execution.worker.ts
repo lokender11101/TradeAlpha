@@ -3,6 +3,8 @@ import { Worker, Job } from 'bullmq';
 import Redis from 'ioredis';
 import pino from 'pino';
 import { OrderService } from '../services/order.service';
+import { runInTrace } from '../utils/telemetry-utils';
+import { SpanKind } from '@opentelemetry/api';
 import { defaultMarketSessionService } from '../services/market-session.service';
 
 const logger = pino({
@@ -19,6 +21,7 @@ export interface ExecuteFillJob {
   executionIdempotencyKey: string;
   correlationId?: string;
   originTimestamp?: string;
+  metadata?: Record<string, string>;
 }
 
 export class ExecutionWorker {
@@ -57,6 +60,7 @@ export class ExecutionWorker {
   }
 
   private async processJob(job: Job<ExecuteFillJob>): Promise<void> {
+    return runInTrace('ExecutionWorker EXECUTE_FILL', job.data.metadata || {}, SpanKind.CONSUMER, async () => {
     const { orderId, price, quantity, executionIdempotencyKey, correlationId, originTimestamp } = job.data;
     logger.info({ orderId, price, quantity, executionIdempotencyKey, correlationId: correlationId || 'system' }, 'Processing EXECUTE_FILL job');
 
@@ -94,5 +98,6 @@ export class ExecutionWorker {
       }
       throw err;
     }
+    });
   }
 }

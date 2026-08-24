@@ -1,5 +1,10 @@
+import { setupTelemetry } from "./telemetry";
+setupTelemetry("tradealpha-engine");
+
 import dotenv from 'dotenv';
 import pino from 'pino';
+import express from 'express';
+import { metricsRegistry } from './telemetry';
 import { PrismaClient } from '@prisma/client';
 import { TradingEngine } from './engine/trading-engine';
 import { OrderService } from './services/order.service';
@@ -58,3 +63,10 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 export { tradingEngine };
+
+const metricsApp = express();
+metricsApp.get('/metrics', async (req, res) => {
+  res.set('Content-Type', metricsRegistry.contentType);
+  res.end(await metricsRegistry.metrics());
+});
+metricsApp.listen(4001, () => console.log('Metrics on port 4001'));

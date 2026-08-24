@@ -1,5 +1,10 @@
+import { setupTelemetry } from "./telemetry";
+setupTelemetry("tradealpha-feed");
+
 import dotenv from 'dotenv';
 import pino from 'pino';
+import express from 'express';
+import { metricsRegistry } from './telemetry';
 import Redis from 'ioredis';
 import * as crypto from 'crypto';
 import { MarketSimulatorService } from './services/market-simulator.service';
@@ -176,3 +181,10 @@ if (process.env.NODE_ENV !== 'test') {
     process.exit(0);
   });
 }
+
+const metricsApp = express();
+metricsApp.get('/metrics', async (req, res) => {
+  res.set('Content-Type', metricsRegistry.contentType);
+  res.end(await metricsRegistry.metrics());
+});
+metricsApp.listen(4003, () => console.log('Metrics on port 4003'));

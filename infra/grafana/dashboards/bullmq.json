@@ -1,0 +1,50 @@
+{
+  "title": "BullMQ",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Job Processing Time",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tradealpha_bullmq_processing_duration_seconds_bucket[5m])) by (le, queue))",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Active Jobs",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "tradealpha_bullmq_active_jobs",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    }
+  ],
+  "schemaVersion": 30,
+  "timezone": "browser",
+  "refresh": "5s"
+}
