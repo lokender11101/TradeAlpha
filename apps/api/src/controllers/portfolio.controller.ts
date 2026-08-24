@@ -98,4 +98,58 @@ export class PortfolioController {
       res.status(500).json({ error: { code: 'INTERNAL_SERVER_ERROR', message: error.message } });
     }
   }
+
+  static async getHistory(req: AuthenticatedRequest, res: Response) {
+    try {
+      const portfolioId = req.params.portfolioId as string;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+
+      const portfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId } });
+      
+      if (!portfolio) {
+        return res.status(404).json({ error: 'Portfolio not found' });
+      }
+
+      if (portfolio.userId !== userId) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      const limit = parseInt(req.query.limit as string) || 30; // default 30 days
+      const daysStr = req.query.days as string;
+      
+      let fromDate: Date | undefined;
+      if (daysStr) {
+        const days = parseInt(daysStr);
+        fromDate = new Date();
+        fromDate.setDate(fromDate.getDate() - days);
+      }
+
+      const whereClause: any = { portfolioId };
+      if (fromDate) {
+        whereClause.snapshotDate = { gte: fromDate };
+      }
+
+      const history = await prisma.portfolioSnapshot.findMany({
+        where: whereClause,
+        orderBy: { snapshotDate: 'asc' },
+        take: limit
+      });
+
+      const formatted = history.map(h => ({
+        date: h.snapshotDate.toISOString(),
+        cash: h.totalCash.toString(),
+        marketValue: h.marketValue.toString(),
+        nav: h.totalNav.toString(),
+        realizedPnl: h.realizedPnl.toString(),
+        unrealizedPnl: h.unrealizedPnl.toString(),
+      }));
+
+      res.status(200).json(formatted);
+    } catch (error: any) {
+      res.status(500).json({ error: { code: 'INTERNAL_SERVER_ERROR', message: error.message } });
+    }
+  }
 }

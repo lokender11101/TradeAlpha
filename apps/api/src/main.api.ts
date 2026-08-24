@@ -66,6 +66,7 @@ app.delete('/api/orders/:id', requireCsrfToken, authenticateJWT, OrderController
 // Portfolio Routes
 app.get('/api/portfolios/:portfolioId', authenticateJWT, PortfolioController.getPortfolio);
 app.get('/api/portfolios/:portfolioId/positions', authenticateJWT, PortfolioController.getPositions);
+app.get('/api/portfolios/:portfolioId/history', authenticateJWT, PortfolioController.getHistory);
 
 app.use((req: express.Request, res: express.Response, _next: express.NextFunction) => {
   res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });
