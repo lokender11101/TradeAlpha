@@ -5,7 +5,6 @@ import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentation
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
-import { PrismaInstrumentation } from '@prisma/instrumentation';
 import * as promClient from 'prom-client';
 import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
@@ -59,7 +58,6 @@ export function setupTelemetry(serviceName: string) {
       new ExpressInstrumentation(),
       new SocketIoInstrumentation(),
       new IORedisInstrumentation(),
-      new PrismaInstrumentation(), 
     ],
   });
 

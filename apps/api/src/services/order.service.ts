@@ -36,6 +36,8 @@ const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   EXPIRED: []
 };
 
+import { trace } from '@opentelemetry/api';
+
 export class OrderService {
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -44,19 +46,26 @@ export class OrderService {
   }
 
   public async placeOrder(dto: PlaceOrderDto) {
-    const requestedQuantity = new Prisma.Decimal(dto.requestedQuantity);
-    if (requestedQuantity.lte(0)) {
-      throw new Error('Quantity must be greater than zero');
-    }
-    if (dto.type === 'LIMIT' && !dto.limitPrice) throw new Error('LIMIT orders require a limitPrice');
-    if (dto.type === 'STOP' && !dto.stopPrice) throw new Error('STOP orders require a stopPrice');
-    if (dto.type === 'STOP_LIMIT' && (!dto.stopPrice || !dto.limitPrice)) throw new Error('STOP_LIMIT orders require both stopPrice and limitPrice');
+    const tracer = trace.getTracer('tradealpha-api');
+    return tracer.startActiveSpan('OrderService.placeOrder', async (span) => {
+      try {
+        span.setAttribute('order.symbol', dto.symbol);
+        span.setAttribute('order.side', dto.side);
+        span.setAttribute('order.type', dto.type);
+        
+        const requestedQuantity = new Prisma.Decimal(dto.requestedQuantity);
+        if (requestedQuantity.lte(0)) {
+          throw new Error('Quantity must be greater than zero');
+        }
+        if (dto.type === 'LIMIT' && !dto.limitPrice) throw new Error('LIMIT orders require a limitPrice');
+        if (dto.type === 'STOP' && !dto.stopPrice) throw new Error('STOP orders require a stopPrice');
+        if (dto.type === 'STOP_LIMIT' && (!dto.stopPrice || !dto.limitPrice)) throw new Error('STOP_LIMIT orders require both stopPrice and limitPrice');
 
-    defaultMarketSessionService.assertOpen();
+        defaultMarketSessionService.assertOpen();
 
-    const existing = await this.prisma.order.findUnique({
-      where: { idx_orders_user_idempotency: { userId: dto.userId, idempotencyKey: dto.idempotencyKey } }
-    });
+        const existing = await this.prisma.order.findUnique({
+          where: { idx_orders_user_idempotency: { userId: dto.userId, idempotencyKey: dto.idempotencyKey } }
+        });
     if (existing) return existing;
 
     const currentMarketPrice = new Prisma.Decimal(dto.currentMarketPrice);
@@ -130,6 +139,13 @@ export class OrderService {
       }
       throw error;
     }
+      } catch (err: any) {
+        span.recordException(err);
+        throw err;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   public async markOrderPending(orderId: string): Promise<Order> {
