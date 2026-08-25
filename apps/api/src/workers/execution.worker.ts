@@ -89,11 +89,15 @@ export class ExecutionWorker {
         quantity,
         fillIdempotencyKey: executionIdempotencyKey
       });
-    } catch (err: unknown) {
+    } catch (err: any) {
       if (err instanceof Error && err.message.includes('Invalid state transition')) {
         // If order was expired by EOD sweep, processFill will throw invalid state transition.
         // We catch it and warn, ignoring the stale fill.
         logger.warn({ orderId, err: err.message }, 'EXECUTE_FILL stale: Order is no longer executable');
+        return;
+      }
+      if (err && (err.code === 'P2025' || (err.message && err.message.toLowerCase().includes('not found')))) {
+        logger.warn({ orderId, err: err.message }, 'EXECUTE_FILL stale: Order was deleted or not found');
         return;
       }
       throw err;

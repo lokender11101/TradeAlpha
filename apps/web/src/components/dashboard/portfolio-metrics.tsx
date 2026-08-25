@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { apiFetch } from '@/lib/api';
+import { useSocket } from '@/lib/socket-context';
 
 export function PortfolioMetrics() {
   const { user } = useAuth();
@@ -21,11 +22,28 @@ export function PortfolioMetrics() {
     }
   }, [user]);
 
+  const { socket } = useSocket();
+
   useEffect(() => {
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 5000);
+
+    if (socket) {
+      const handleUpdate = () => fetchMetrics();
+      socket.on('POSITION_UPDATED', handleUpdate);
+      socket.on('ORDER_FILLED', handleUpdate);
+      socket.on('PORTFOLIO_UPDATED', handleUpdate);
+      
+      return () => {
+        clearInterval(interval);
+        socket.off('POSITION_UPDATED', handleUpdate);
+        socket.off('ORDER_FILLED', handleUpdate);
+        socket.off('PORTFOLIO_UPDATED', handleUpdate);
+      };
+    }
+
     return () => clearInterval(interval);
-  }, [fetchMetrics]);
+  }, [fetchMetrics, socket]);
 
   if (!metrics) return <div>Loading metrics...</div>;
 

@@ -10,6 +10,10 @@ async function main() {
 
   const e2eEmail = 'playwright@tradealpha.local';
   
+  const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+  const Redis = require('ioredis');
+  const redis = new Redis(redisUrl);
+
   // Clean up previous test runs if any
   const existingUser = await prisma.user.findUnique({ where: { email: e2eEmail } });
   if (existingUser) {
@@ -17,15 +21,27 @@ async function main() {
     // Delete related entities first
     const portfolios = await prisma.portfolio.findMany({ where: { userId: existingUser.id } });
     for (const portfolio of portfolios) {
+      const orders = await prisma.order.findMany({ where: { portfolioId: portfolio.id } });
+      
       await prisma.orderFill.deleteMany({ where: { order: { portfolioId: portfolio.id } } });
       await prisma.order.deleteMany({ where: { portfolioId: portfolio.id } });
       await prisma.position.deleteMany({ where: { portfolioId: portfolio.id } });
-  await prisma.portfolioSnapshot.deleteMany({ where: { portfolioId: portfolio.id } });
+      await prisma.portfolioSnapshot.deleteMany({ where: { portfolioId: portfolio.id } });
 
+      // Notify TradingEngine that these orders are gone so it evicts them from memory
+      for (const order of orders) {
+        await redis.publish(`engine:route:${order.symbol}`, JSON.stringify({ orderId: order.id, symbol: order.symbol }));
+      }
     }
     await prisma.portfolio.deleteMany({ where: { userId: existingUser.id } });
     await prisma.user.delete({ where: { id: existingUser.id } });
   }
+
+  // Clear BullMQ execution queue to prevent stale retry spam
+  // DO NOT use redis.del on BullMQ keys while workers are actively listening, 
+  // as it destroys the Redis streams and causes workers to hang indefinitely.
+  // The TradingEngine now handles ghost order eviction correctly on its own.
+  await redis.quit();
 
   // Create new user
   const passwordHash = await bcrypt.hash('Playwright123!', 10);

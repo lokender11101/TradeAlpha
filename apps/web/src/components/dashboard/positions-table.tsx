@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { apiFetch } from '@/lib/api';
+import { useSocket } from '@/lib/socket-context';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export function PositionsTable() {
@@ -25,11 +26,28 @@ export function PositionsTable() {
     }
   }, [user]);
 
+  const { socket } = useSocket();
+
   useEffect(() => {
     fetchPositions();
     const interval = setInterval(fetchPositions, 5000);
+
+    if (socket) {
+      const handleUpdate = () => fetchPositions();
+      socket.on('POSITION_UPDATED', handleUpdate);
+      socket.on('ORDER_FILLED', handleUpdate);
+      socket.on('MARKET_TICK', handleUpdate);
+      
+      return () => {
+        clearInterval(interval);
+        socket.off('POSITION_UPDATED', handleUpdate);
+        socket.off('ORDER_FILLED', handleUpdate);
+        socket.off('MARKET_TICK', handleUpdate);
+      };
+    }
+
     return () => clearInterval(interval);
-  }, [fetchPositions]);
+  }, [fetchPositions, socket]);
 
   if (loading) return <div>Loading positions...</div>;
 

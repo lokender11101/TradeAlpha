@@ -34,7 +34,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     if (socket?.connected) return;
 
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-    const socketUrl = new URL(baseUrl).origin;
+    const socketUrl = typeof window !== 'undefined' 
+      ? new URL(baseUrl, window.location.href).origin 
+      : baseUrl;
     const socketIo = io(socketUrl, {
       withCredentials: true,
       transports: ['websocket', 'polling']

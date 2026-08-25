@@ -224,6 +224,8 @@ export class TradingEngine {
       }
     });
 
+    const pendingDbOrderIds = new Set(orders.map(o => o.id));
+
     let recoveredCount = 0;
     for (const order of orders) {
       const requestedQty = new Prisma.Decimal(order.requestedQuantity);
@@ -239,6 +241,23 @@ export class TradingEngine {
           recoveredCount++;
         }
       }
+    }
+
+    let evictedCount = 0;
+    for (const symbol of this.ownedSymbols) {
+      const book = this.orders.get(symbol);
+      if (book) {
+        for (const orderId of book.keys()) {
+          if (!pendingDbOrderIds.has(orderId)) {
+            book.delete(orderId);
+            evictedCount++;
+          }
+        }
+      }
+    }
+
+    if (evictedCount > 0) {
+      logger.info({ evictedCount }, '[Reconciliation] Evicted ghost orders from memory');
     }
 
     if (recoveredCount > 0) {
@@ -333,7 +352,11 @@ export class TradingEngine {
                   const filledQty = new Prisma.Decimal(order.filledQuantity);
                   if (requestedQty.minus(filledQty).gt(0) && (order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED')) {
                     this.addOrder(order, payload.correlationId, payload.metadata);
+                  } else {
+                    this.removeOrder(order.id, order.symbol);
                   }
+                } else if (!order) {
+                  this.removeOrder(payload.orderId, payload.symbol);
                 }
               })
               .catch(err => {

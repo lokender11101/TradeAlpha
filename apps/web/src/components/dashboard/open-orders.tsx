@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { apiFetch } from '@/lib/api';
+import { useSocket } from '@/lib/socket-context';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
@@ -11,7 +12,7 @@ export function OpenOrders() {
 
   const fetchOrders = useCallback(async () => {
     try {
-      const res = await apiFetch('/orders?status=PENDING&status=PARTIALLY_FILLED', { method: 'GET' });
+      const res = await apiFetch(`/orders?status=PENDING&status=PARTIALLY_FILLED`, { method: 'GET' });
       if (res.ok) {
         const data = await res.json();
         setOrders(data.data || []);
@@ -23,12 +24,34 @@ export function OpenOrders() {
     }
   }, []);
 
+  const { socket } = useSocket();
+
   useEffect(() => {
     fetchOrders();
-    // In a real app, you would also listen to Socket.IO for order updates to refresh this list
     const interval = setInterval(fetchOrders, 5000);
+
+    if (socket) {
+      const handleOrderUpdate = () => fetchOrders();
+      socket.on('ORDER_ACCEPTED', handleOrderUpdate);
+      socket.on('ORDER_PENDING', handleOrderUpdate);
+      socket.on('ORDER_FILLED', handleOrderUpdate);
+      socket.on('ORDER_PARTIALLY_FILLED', handleOrderUpdate);
+      socket.on('ORDER_CANCELLED', handleOrderUpdate);
+      socket.on('ORDER_EXPIRED', handleOrderUpdate);
+      
+      return () => {
+        clearInterval(interval);
+        socket.off('ORDER_ACCEPTED', handleOrderUpdate);
+        socket.off('ORDER_PENDING', handleOrderUpdate);
+        socket.off('ORDER_FILLED', handleOrderUpdate);
+        socket.off('ORDER_PARTIALLY_FILLED', handleOrderUpdate);
+        socket.off('ORDER_CANCELLED', handleOrderUpdate);
+        socket.off('ORDER_EXPIRED', handleOrderUpdate);
+      };
+    }
+
     return () => clearInterval(interval);
-  }, [fetchOrders]);
+  }, [fetchOrders, socket]);
 
   const handleCancel = async (orderId: string) => {
     try {

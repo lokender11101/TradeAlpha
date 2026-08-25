@@ -37,7 +37,8 @@ export class WebSocketServer {
 
     this.io = new Server(httpServer, {
       cors: {
-        origin: '*',
+        origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+        credentials: true
       },
       adapter: createAdapter(this.pubClient, this.subClient),
       pingTimeout: 5000,

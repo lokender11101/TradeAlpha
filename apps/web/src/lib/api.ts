@@ -21,6 +21,7 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}): Pro
   const fetchOptions: RequestInit = {
     ...options,
     headers,
+    cache: options.cache || 'no-store',
     credentials: 'true' === process.env.NEXT_PUBLIC_DISABLE_CREDENTIALS ? 'same-origin' : 'include',
   };
 

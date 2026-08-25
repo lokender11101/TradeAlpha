@@ -41,7 +41,22 @@ export default defineConfig({
 
     {
       name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
+      use: {
+        ...devices['Desktop Firefox'],
+        launchOptions: {
+          firefoxUserPrefs: {
+            'network.cookie.sameSite.laxByDefault': false,
+            'network.cookie.sameSite.noneRequiresSecure': false,
+            'privacy.trackingprotection.enabled': false,
+            'privacy.trackingprotection.pbmode.enabled': false,
+            'privacy.trackingprotection.cryptomining.enabled': false,
+            'privacy.trackingprotection.fingerprinting.enabled': false,
+            'privacy.annotate_channels.strict_list.enabled': false,
+            'privacy.partition.network_state': false,
+            'network.websocket.allowInsecureFromHTTPS': true
+          }
+        }
+      },
     },
 
     // {

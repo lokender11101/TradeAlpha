@@ -53,6 +53,10 @@ export class OrderController {
   }
   static async getOrders(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      
       const userId = req.user?.id;
       if (!userId) {
         res.status(401).json({ error: 'Unauthorized' });

@@ -13,6 +13,10 @@ const valuationService = new PortfolioValuationService(prisma, priceCache);
 export class PortfolioController {
   static async getPortfolio(req: AuthenticatedRequest, res: Response) {
     try {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+
       const portfolioId = req.params.portfolioId as string;
       const userId = req.user?.id;
       if (!userId) {
@@ -41,6 +45,10 @@ export class PortfolioController {
 
   static async getPositions(req: AuthenticatedRequest, res: Response) {
     try {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      
       const portfolioId = req.params.portfolioId as string;
       
       const userId = req.user?.id;

@@ -36,7 +36,7 @@ import { requireCsrfToken } from './middlewares/csrf.middleware';
 import { correlationMiddleware } from './middlewares/correlation.middleware';
 
 app.use(correlationMiddleware);
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3000', credentials: true }));
 app.use(express.json());
 
 app.get('/metrics', async (req, res) => {

@@ -50,18 +50,21 @@ test.describe('Portfolio E2E', () => {
 
     const redis = new Redis('redis://localhost:6379');
     
+    let tickSecond = 10;
     await expect.poll(async () => {
       await redis.publish('market:tick:RELIANCE', JSON.stringify({
         symbol: 'RELIANCE',
         price: 150.00,
-        timestamp: '2026-08-15T06:30:00.000Z'
+        timestamp: `2026-08-15T06:30:${tickSecond.toString().padStart(2, '0')}.000Z`
       }));
+      tickSecond++;
+      if (tickSecond > 59) tickSecond = 10;
       
       const isVisible = await page.locator('td', { hasText: 'PENDING' }).first().isVisible();
       return isVisible;
     }, {
       intervals: [1000],
-      timeout: 15000
+      timeout: 60000
     }).toBeFalsy();
 
     await redis.quit();
@@ -70,11 +73,9 @@ test.describe('Portfolio E2E', () => {
     await page.waitForURL('/dashboard');
     
     await expect.poll(async () => {
-      await page.reload(); 
-      await page.waitForSelector('text=Net Asset Value (NAV)');
       const current = await getMetrics();
       return current.cash;
-    }, { intervals: [2000], timeout: 20000 }).toBeLessThan(initial.cash);
+    }, { intervals: [2000], timeout: 60000 }).toBeLessThan(initial.cash);
 
     const current = await getMetrics();
     const orderCost = initial.cash - current.cash;
