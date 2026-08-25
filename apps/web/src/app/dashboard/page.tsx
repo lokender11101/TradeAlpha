@@ -4,6 +4,7 @@ import { useAuth } from '@/lib/auth-context';
 import { PortfolioMetrics } from '@/components/dashboard/portfolio-metrics';
 import { PositionsTable } from '@/components/dashboard/positions-table';
 import { OpenOrders } from '@/components/dashboard/open-orders';
+import { EquityCurve } from '@/components/dashboard/equity-curve';
 
 export default function DashboardPage() {
   const { user, loading } = useAuth();
@@ -20,6 +21,8 @@ export default function DashboardPage() {
       
       <PortfolioMetrics />
       
+      <EquityCurve />
+
       <div className="grid gap-8">
         <PositionsTable />
         <OpenOrders />

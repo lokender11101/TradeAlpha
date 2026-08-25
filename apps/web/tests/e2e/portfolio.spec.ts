@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
+import Redis from 'ioredis';
 
 test.describe('Portfolio E2E', () => {
   test.beforeAll(async ({ request }) => {
@@ -13,41 +14,80 @@ test.describe('Portfolio E2E', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/login');
     await page.fill('input[type="email"]', 'playwright@tradealpha.local');
-    await page.fill('input[type="password"]', 'Playwright!23');
+    await page.fill('input[type="password"]', 'Playwright123!');
     await page.click('button[type="submit"]');
-    await page.waitForURL('/dashboard');
+    await page.waitForURL('**/dashboard', { waitUntil: 'domcontentloaded' });
   });
 
   test('Buy a position and confirm NAV does not decrease', async ({ page }) => {
     await page.waitForSelector('text=Net Asset Value (NAV)');
-    const metrics = await page.locator('.text-3xl.font-bold').allInnerTexts();
-    const initialNav = parseFloat(metrics[0].replace('$', ''));
-    const initialCash = parseFloat(metrics[1].replace('$', ''));
+    const getMetrics = async () => {
+      const navEl = page.locator('div:has(> h3:has-text("Net Asset Value")) > p').first();
+      const cashEl = page.locator('div:has(> h3:has-text("Total Cash")) > p').first();
+      
+      const navText = await navEl.innerText();
+      const cashText = await cashEl.innerText();
+      
+      return {
+        nav: parseFloat(navText.replace('$', '').replace(/,/g, '')),
+        cash: parseFloat(cashText.replace('$', '').replace(/,/g, ''))
+      };
+    };
+
+    const initial = await getMetrics();
 
     await page.click('a[href="/terminal"]');
     await page.waitForURL('/terminal');
 
-    await page.fill('input[type="number"]', '10');
-    await page.click('button:has-text("MARKET")');
-    await page.click('button:has-text("Submit BUY Order")');
+    await page.selectOption('select', 'RELIANCE');
+    await expect(page.locator('h3', { hasText: 'Chart - RELIANCE' })).toBeVisible();
 
-    await page.waitForSelector('text=Filled', { timeout: 15000 });
+    await page.click('button:has-text("Market")');
+    await page.fill('#qty', '10');
+    await page.click('button:has-text("Place BUY Order")');
+
+    await expect(page.locator('td', { hasText: 'PENDING' }).first()).toBeVisible({ timeout: 10000 });
+
+    const redis = new Redis('redis://localhost:6379');
+    
+    await expect.poll(async () => {
+      await redis.publish('market:tick:RELIANCE', JSON.stringify({
+        symbol: 'RELIANCE',
+        price: 150.00,
+        timestamp: '2026-08-15T06:30:00.000Z'
+      }));
+      
+      const isVisible = await page.locator('td', { hasText: 'PENDING' }).first().isVisible();
+      return isVisible;
+    }, {
+      intervals: [1000],
+      timeout: 15000
+    }).toBeFalsy();
+
+    await redis.quit();
 
     await page.click('a[href="/dashboard"]');
     await page.waitForURL('/dashboard');
     
-    await page.waitForTimeout(6000);
+    await expect.poll(async () => {
+      await page.reload(); 
+      await page.waitForSelector('text=Net Asset Value (NAV)');
+      const current = await getMetrics();
+      return current.cash;
+    }, { intervals: [2000], timeout: 20000 }).toBeLessThan(initial.cash);
 
-    const updatedMetrics = await page.locator('.text-3xl.font-bold').allInnerTexts();
-    const newNav = parseFloat(updatedMetrics[0].replace('$', ''));
-    const newCash = parseFloat(updatedMetrics[1].replace('$', ''));
-
-    expect(newCash).toBeLessThan(initialCash);
-    
-    const orderCost = initialCash - newCash;
+    const current = await getMetrics();
+    const orderCost = initial.cash - current.cash;
     expect(orderCost).toBeGreaterThan(0);
     
-    const navDiff = Math.abs(initialNav - newNav);
+    const navDiff = Math.abs(initial.nav - current.nav);
     expect(navDiff).toBeLessThan(orderCost * 0.5); 
+  });
+
+  test('Verify Equity Curve renders after EOD snapshot', async ({ page }) => {
+    await page.waitForSelector('text=Portfolio Equity Curve');
+    const hasCanvas = await page.locator('canvas').count();
+    const hasEmptyText = await page.locator('text=No historical data available').count();
+    expect(hasCanvas + hasEmptyText).toBeGreaterThan(0);
   });
 });

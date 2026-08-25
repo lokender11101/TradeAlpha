@@ -20,6 +20,8 @@ async function main() {
       await prisma.orderFill.deleteMany({ where: { order: { portfolioId: portfolio.id } } });
       await prisma.order.deleteMany({ where: { portfolioId: portfolio.id } });
       await prisma.position.deleteMany({ where: { portfolioId: portfolio.id } });
+  await prisma.portfolioSnapshot.deleteMany({ where: { portfolioId: portfolio.id } });
+
     }
     await prisma.portfolio.deleteMany({ where: { userId: existingUser.id } });
     await prisma.user.delete({ where: { id: existingUser.id } });
