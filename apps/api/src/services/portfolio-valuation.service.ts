@@ -24,7 +24,7 @@ export type PortfolioValuation = {
   freeMargin: string;
   marginLevel: string | null;
   buyingPower: string;
-  marginStatus: "NORMAL" | "MARGIN_CALL" | "FORCED_LIQUIDATION";
+  marginStatus: "NORMAL" | "MARGIN_CALL" | "FORCED_LIQUIDATION" | "FORCED_LIQUIDATION";
   
   isStale: boolean;
 };
@@ -118,12 +118,13 @@ export class PortfolioValuationService {
     const buyingPower = freeMargin.gt(0) ? freeMargin.dividedBy(this.IM_RATE) : new Prisma.Decimal(0);
     
     let marginLevel: string | null = null;
-    let marginStatus: "NORMAL" | "MARGIN_CALL" = "NORMAL";
+    let marginStatus: "NORMAL" | "MARGIN_CALL" | "FORCED_LIQUIDATION" = "NORMAL";
 
     if (maintenanceMargin.gt(0)) {
       const ml = equity.dividedBy(maintenanceMargin).mul(100);
       marginLevel = ml.toFixed(4);
-      if (ml.lt(120)) marginStatus = "MARGIN_CALL";
+      if (ml.lt(100)) marginStatus = "FORCED_LIQUIDATION";
+      else if (ml.lt(120)) marginStatus = "MARGIN_CALL";
 
     }
 

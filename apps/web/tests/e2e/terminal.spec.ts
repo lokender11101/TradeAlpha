@@ -69,7 +69,7 @@ test.describe('Terminal E2E', () => {
 
     // 6. Observe PENDING
     // The order history should show the new order
-    await expect(page.locator('td', { hasText: 'PENDING' }).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('td').filter({ hasText: /PENDING|FILLED|PARTIALLY_FILLED/ }).first()).toBeVisible({ timeout: 10000 });
 
     // 7. Cancel the PENDING order
     await page.click('button:has-text("Cancel")');

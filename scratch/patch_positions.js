@@ -1,4 +1,8 @@
-'use client';
+const fs = require('fs');
+const file = 'apps/web/src/components/dashboard/positions-table.tsx';
+let code = fs.readFileSync(file, 'utf8');
+
+const newCode = `'use client';
 
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -92,8 +96,8 @@ export function PositionsTable() {
                     <div className="flex justify-end items-center space-x-2">
                       <span>{Math.abs(qtyNum).toString()}</span>
                       <span 
-                        className={`text-xs px-1.5 py-0.5 rounded-sm font-semibold ${qtyNum >= 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
-                        aria-label={`Side: ${qtyNum >= 0 ? "LONG" : "SHORT"}`}
+                        className={\`text-xs px-1.5 py-0.5 rounded-sm font-semibold \${qtyNum >= 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}\`}
+                        aria-label={\`Side: \${qtyNum >= 0 ? "LONG" : "SHORT"}\`}
                       >
                         {qtyNum >= 0 ? "LONG" : "SHORT"}
                       </span>
@@ -113,23 +117,23 @@ export function PositionsTable() {
                   <TableCell className="text-right">
                     {pos.totalValue ? (
                       <span className={pos.isStale ? 'text-muted-foreground' : ''}>
-                        ${Math.abs(parseFloat(pos.totalValue)).toFixed(2)}
+                        \${Math.abs(parseFloat(pos.totalValue)).toFixed(2)}
                       </span>
                     ) : (
                       '---'
                     )}
                   </TableCell>
-                  <TableCell className={`text-right ${pos.isStale ? 'text-muted-foreground' : (uPnlNum > 0 ? 'text-green-500' : uPnlNum < 0 ? 'text-red-500' : '')}`}>
+                  <TableCell className={\`text-right \${pos.isStale ? 'text-muted-foreground' : (uPnlNum > 0 ? 'text-green-500' : uPnlNum < 0 ? 'text-red-500' : '')}\`}>
                     {pos.unrealizedPnl ? (
                       <span>
-                        {uPnlNum < 0 ? '-' : ''}${Math.abs(uPnlNum).toFixed(2)}
+                        {uPnlNum < 0 ? '-' : ''}\${Math.abs(uPnlNum).toFixed(2)}
                       </span>
                     ) : (
                       '---'
                     )}
                   </TableCell>
-                  <TableCell className={`text-right ${rPnlNum > 0 ? 'text-green-500' : rPnlNum < 0 ? 'text-red-500' : ''}`}>
-                    {rPnlNum < 0 ? '-' : ''}${Math.abs(rPnlNum).toFixed(2)}
+                  <TableCell className={\`text-right \${rPnlNum > 0 ? 'text-green-500' : rPnlNum < 0 ? 'text-red-500' : ''}\`}>
+                    {rPnlNum < 0 ? '-' : ''}\${Math.abs(rPnlNum).toFixed(2)}
                   </TableCell>
                 </TableRow>
               );
@@ -140,3 +144,6 @@ export function PositionsTable() {
     </div>
   );
 }
+`;
+
+fs.writeFileSync(file, newCode);

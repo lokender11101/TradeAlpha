@@ -1,4 +1,8 @@
-'use client';
+const fs = require('fs');
+const file = 'apps/web/src/components/terminal/order-entry.tsx';
+let code = fs.readFileSync(file, 'utf8');
+
+const newCode = `'use client';
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -52,11 +56,11 @@ export function OrderEntry({ symbol }: { symbol: string }) {
       
       const data = await res.json();
       if (res.ok) {
-        setMessage(`Order accepted: ${data.id}`);
+        setMessage(\`Order accepted: \${data.id}\`);
         setQuantity('');
         setPrice('');
       } else {
-        setMessage(`Error: ${data.error || 'Failed'}`);
+        setMessage(\`Error: \${data.error || 'Failed'}\`);
       }
     } catch (_err) {
       setMessage('Network error');
@@ -126,7 +130,7 @@ export function OrderEntry({ symbol }: { symbol: string }) {
         )}
 
         <Button type="submit" className="w-full mt-4" disabled={loading || !user}>
-          {loading ? 'Submitting...' : `Place ${side} Order`}
+          {loading ? 'Submitting...' : \`Place \${side} Order\`}
         </Button>
         
         {message && (
@@ -136,3 +140,6 @@ export function OrderEntry({ symbol }: { symbol: string }) {
     </div>
   );
 }
+`;
+
+fs.writeFileSync(file, newCode);

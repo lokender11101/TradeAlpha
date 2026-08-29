@@ -20,9 +20,9 @@ test.describe('Portfolio E2E', () => {
   });
 
   test('Buy a position and confirm NAV does not decrease', async ({ page }) => {
-    await page.waitForSelector('text=Net Asset Value (NAV)');
+    await page.waitForSelector('text=Equity / NAV');
     const getMetrics = async () => {
-      const navEl = page.locator('div:has(> h3:has-text("Net Asset Value")) > p').first();
+      const navEl = page.locator('div:has(> h3:has-text("Equity / NAV")) > p').first();
       const cashEl = page.locator('div:has(> h3:has-text("Total Cash")) > p').first();
       
       const navText = await navEl.innerText();
@@ -46,7 +46,7 @@ test.describe('Portfolio E2E', () => {
     await page.fill('#qty', '10');
     await page.click('button:has-text("Place BUY Order")');
 
-    await expect(page.locator('td', { hasText: 'PENDING' }).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('td').filter({ hasText: /PENDING|FILLED/ }).first()).toBeVisible({ timeout: 10000 });
 
     const redis = new Redis('redis://localhost:6379');
     

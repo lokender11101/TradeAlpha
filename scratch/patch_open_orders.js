@@ -1,4 +1,8 @@
-'use client';
+const fs = require('fs');
+const file = 'apps/web/src/components/dashboard/open-orders.tsx';
+let code = fs.readFileSync(file, 'utf8');
+
+const newCode = `'use client';
 
 import { useEffect, useState, useCallback } from 'react';
 import { apiFetch } from '@/lib/api';
@@ -58,7 +62,7 @@ export function OpenOrders() {
 
   const handleCancel = async (orderId: string) => {
     try {
-      const res = await apiFetch(`/orders/${orderId}`, { method: 'DELETE' });
+      const res = await apiFetch(\`/orders/\${orderId}\`, { method: 'DELETE' });
       if (res.ok) {
         fetchOrders();
       } else {
@@ -136,3 +140,6 @@ export function OpenOrders() {
     </div>
   );
 }
+`;
+
+fs.writeFileSync(file, newCode);
