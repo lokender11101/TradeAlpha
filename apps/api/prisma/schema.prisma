@@ -1,6 +1,5 @@
 generator client {
   provider = "prisma-client-js"
-  
 }
 
 datasource db {
@@ -20,20 +19,19 @@ model User {
 }
 
 model Portfolio {
-  id         String     @id @default(uuid())
-  userId     String     @map("user_id")
-  totalCash  Decimal    @default(0) @map("total_cash") @db.Decimal(19, 4)
-  lockedCash Decimal    @default(0) @map("locked_cash") @db.Decimal(19, 4)
-  isMarginEnabled Boolean    @default(false) @map("is_margin_enabled")
-  lockedMargin    Decimal    @default(0) @map("locked_margin") @db.Decimal(19, 4)
+  id              String  @id @default(uuid())
+  userId          String  @map("user_id")
+  totalCash       Decimal @default(0) @map("total_cash") @db.Decimal(19, 4)
+  lockedCash      Decimal @default(0) @map("locked_cash") @db.Decimal(19, 4)
+  isMarginEnabled Boolean @default(false) @map("is_margin_enabled")
+  lockedMargin    Decimal @default(0) @map("locked_margin") @db.Decimal(19, 4)
 
-  createdAt  DateTime   @default(now()) @map("created_at")
-  updatedAt  DateTime   @updatedAt @map("updated_at")
-  orders     Order[]
-  user       User       @relation(fields: [userId], references: [id])
-  positions  Position[]
-  snapshots  PortfolioSnapshot[]
-
+  createdAt DateTime            @default(now()) @map("created_at")
+  updatedAt DateTime            @updatedAt @map("updated_at")
+  orders    Order[]
+  user      User                @relation(fields: [userId], references: [id])
+  positions Position[]
+  snapshots PortfolioSnapshot[]
 
   @@map("portfolios")
 }
@@ -51,6 +49,7 @@ model Position {
   portfolio         Portfolio      @relation(fields: [portfolioId], references: [id])
 
   @@unique([portfolioId, symbol])
+  @@index([symbol])
   @@map("positions")
 }
 
@@ -71,13 +70,15 @@ model Order {
   updatedAt         DateTime    @updatedAt @map("updated_at")
   reservationPrice  Decimal?    @map("reservation_price") @db.Decimal(19, 4)
   reservedMargin    Decimal?    @map("reserved_margin") @db.Decimal(19, 4)
+  isLiquidation     Boolean     @default(false) @map("is_liquidation")
 
-  isActivated       Boolean     @default(false) @map("is_activated")
-  fills             OrderFill[]
-  portfolio         Portfolio   @relation(fields: [portfolioId], references: [id])
+  isActivated Boolean     @default(false) @map("is_activated")
+  fills       OrderFill[]
+  portfolio   Portfolio   @relation(fields: [portfolioId], references: [id])
 
   @@unique([userId, idempotencyKey], name: "idx_orders_user_idempotency")
   @@index([userId, status], map: "idx_orders_user_status")
+  @@index([portfolioId, isLiquidation, status])
   @@map("orders")
 }
 
@@ -204,18 +205,18 @@ model MarketCandle {
 }
 
 model PortfolioSnapshot {
-  id            String    @id @default(uuid())
-  portfolioId   String    @map("portfolio_id")
-  snapshotDate  DateTime  @map("snapshot_date") @db.Date
-  totalCash     Decimal   @map("total_cash") @db.Decimal(19, 4)
-  marketValue   Decimal   @map("market_value") @db.Decimal(19, 4)
-  totalNav      Decimal   @map("total_nav") @db.Decimal(19, 4)
-  unrealizedPnl Decimal   @map("unrealized_pnl") @db.Decimal(19, 4)
-  realizedPnl   Decimal   @map("realized_pnl") @db.Decimal(19, 4)
-  isStale       Boolean   @default(false) @map("is_stale")
-  createdAt     DateTime  @default(now()) @map("created_at")
+  id            String   @id @default(uuid())
+  portfolioId   String   @map("portfolio_id")
+  snapshotDate  DateTime @map("snapshot_date") @db.Date
+  totalCash     Decimal  @map("total_cash") @db.Decimal(19, 4)
+  marketValue   Decimal  @map("market_value") @db.Decimal(19, 4)
+  totalNav      Decimal  @map("total_nav") @db.Decimal(19, 4)
+  unrealizedPnl Decimal  @map("unrealized_pnl") @db.Decimal(19, 4)
+  realizedPnl   Decimal  @map("realized_pnl") @db.Decimal(19, 4)
+  isStale       Boolean  @default(false) @map("is_stale")
+  createdAt     DateTime @default(now()) @map("created_at")
 
-  portfolio     Portfolio @relation(fields: [portfolioId], references: [id])
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id])
 
   @@unique([portfolioId, snapshotDate])
   @@index([portfolioId, snapshotDate(sort: Desc)])

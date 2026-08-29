@@ -4,6 +4,7 @@ import Redis from 'ioredis';
 import pino from 'pino';
 import { EventEnvelope } from '../websocket';
 import { OrderService } from '../services/order.service';
+import { Queue } from 'bullmq';
 import { runInTrace } from '../utils/telemetry-utils';
 import { SpanKind, propagation, context, trace } from '@opentelemetry/api';
 const logger = pino({
@@ -18,6 +19,7 @@ export class DomainEventDispatcherWorker {
   private readonly redis: Redis;
   private readonly emitter: Emitter;
   private readonly orderService: OrderService;
+  private readonly liquidationQueue: Queue;
 
   constructor(
     redisUrl: string,
@@ -26,6 +28,7 @@ export class DomainEventDispatcherWorker {
   ) {
     this.redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
     this.emitter = new Emitter(this.redis);
+    this.liquidationQueue = new Queue('liquidation-eval-queue', { connection: this.redis });
     this.orderService = orderService;
 
     this.worker = new Worker(queueName, async (job: Job) => {
@@ -77,6 +80,17 @@ export class DomainEventDispatcherWorker {
           }
         }
       } else if (['ORDER_PARTIALLY_FILLED', 'ORDER_FILLED', 'ORDER_REJECTED', 'ORDER_CANCELLED', 'ORDER_EXPIRED'].includes(type) && orderId) {
+        if (type === 'ORDER_FILLED' || type === 'ORDER_PARTIALLY_FILLED') {
+          const portfolioId = businessPayload.portfolioId as string | undefined;
+          if (portfolioId) {
+            const jobId = `eval_${portfolioId}_${Math.floor(Date.now() / 1000)}`;
+            this.liquidationQueue.add('evaluate-risk', { portfolioId }, {
+              jobId,
+              removeOnComplete: true,
+              removeOnFail: 1000
+            }).catch(e => logger.error({ err: e }, 'Failed to enqueue post-fill risk evaluation'));
+          }
+        }
         const symbol = businessPayload.symbol as string | undefined;
         if (symbol) {
           logger.info({ orderId, symbol, correlationId }, `[Dispatcher] Routed ${type} and published engine route`);
@@ -120,6 +134,7 @@ export class DomainEventDispatcherWorker {
 
   public async close(): Promise<void> {
     await this.worker.close();
+    await this.liquidationQueue.close();
     await this.redis.quit();
   }
 }

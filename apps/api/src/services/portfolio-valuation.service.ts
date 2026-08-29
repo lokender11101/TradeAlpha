@@ -24,7 +24,7 @@ export type PortfolioValuation = {
   freeMargin: string;
   marginLevel: string | null;
   buyingPower: string;
-  marginStatus: "NORMAL" | "MARGIN_CALL";
+  marginStatus: "NORMAL" | "MARGIN_CALL" | "FORCED_LIQUIDATION";
   
   isStale: boolean;
 };

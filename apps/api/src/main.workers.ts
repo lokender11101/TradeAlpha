@@ -32,12 +32,15 @@ const orderService = new OrderService(prisma);
 
 import { EodSweepService } from './services/eod-sweep.service';
 import { OhlcvAggregatorWorker } from './workers/ohlcv-aggregator.worker';
+import { defaultLiquidationTriggerService } from './services/liquidation-trigger.service';
+import { LiquidationWorker } from './workers/liquidation.worker';
 
 const outboxWorker = new OutboxWorker(prisma, redisUrl);
 const executionWorker = new ExecutionWorker(prisma, redisUrl);
 const domainEventDispatcher = new DomainEventDispatcherWorker(redisUrl, orderService);
 const eodSweepService = new EodSweepService(redisUrl, prisma);
 const ohlcvAggregator = new OhlcvAggregatorWorker(prisma, redisUrl);
+const liquidationWorker = new LiquidationWorker();
 
 if (process.env.NODE_ENV !== 'test') {
   logger.info('[Workers] Starting background workers...');
@@ -45,6 +48,7 @@ if (process.env.NODE_ENV !== 'test') {
   Promise.all([
     outboxWorker.start(),
     ohlcvAggregator.start(),
+    defaultLiquidationTriggerService.start(),
   ]).then(() => {
     eodSweepService.start();
     logger.info('[Workers] All background workers started successfully.');
@@ -58,6 +62,8 @@ if (process.env.NODE_ENV !== 'test') {
     eodSweepService.stop();
     await outboxWorker.stop();
     await ohlcvAggregator.stop();
+    await defaultLiquidationTriggerService.stop();
+    await liquidationWorker.close();
     await executionWorker.close();
     await domainEventDispatcher.close();
     await prisma.$disconnect();
@@ -68,7 +74,7 @@ if (process.env.NODE_ENV !== 'test') {
   process.on('SIGTERM', shutdown);
 }
 
-export { outboxWorker, executionWorker, domainEventDispatcher, eodSweepService, ohlcvAggregator };
+export { outboxWorker, executionWorker, domainEventDispatcher, eodSweepService, ohlcvAggregator, defaultLiquidationTriggerService as liquidationTrigger, liquidationWorker };
 
 const metricsApp = express();
 metricsApp.get('/metrics', async (req, res) => {

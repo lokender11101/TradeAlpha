@@ -5,6 +5,10 @@ jest.mock('bullmq', () => ({
   Worker: jest.fn().mockImplementation((_name, _processor, _opts) => ({
     on: jest.fn(),
     close: jest.fn()
+  })),
+  Queue: jest.fn().mockImplementation(() => ({
+    add: jest.fn().mockResolvedValue({}),
+    close: jest.fn()
   }))
 }));
 

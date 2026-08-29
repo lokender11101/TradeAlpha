@@ -119,6 +119,7 @@ describe('TradingEngine Phase 3', () => {
     reservedMargin: null,
     idempotencyKey: 'test',
     isActivated: false,
+    isLiquidation: false,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides

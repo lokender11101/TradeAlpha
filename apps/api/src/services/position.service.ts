@@ -154,7 +154,7 @@ export class PositionService {
       throw new Error(`Insufficient locked quantity: Required ${sellQuantity.toString()}, Available ${position.lockedQuantity.toString()}`);
     }
 
-    let newQuantity = currentQty.minus(sellQuantity);
+    const newQuantity = currentQty.minus(sellQuantity);
     let newAverage = currentAvg;
     let realizedPnl = new Prisma.Decimal(0);
 
