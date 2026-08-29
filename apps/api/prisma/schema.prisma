@@ -70,6 +70,8 @@ model Order {
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @updatedAt @map("updated_at")
   reservationPrice  Decimal?    @map("reservation_price") @db.Decimal(19, 4)
+  reservedMargin    Decimal?    @map("reserved_margin") @db.Decimal(19, 4)
+
   isActivated       Boolean     @default(false) @map("is_activated")
   fills             OrderFill[]
   portfolio         Portfolio   @relation(fields: [portfolioId], references: [id])

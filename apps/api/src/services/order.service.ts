@@ -71,12 +71,10 @@ export class OrderService {
     const currentMarketPrice = new Prisma.Decimal(dto.currentMarketPrice);
     let reservationPrice = new Prisma.Decimal(0);
     
-    if (dto.side === 'BUY') {
-      if (dto.type === 'LIMIT' || dto.type === 'STOP_LIMIT') {
-        reservationPrice = new Prisma.Decimal(dto.limitPrice!);
-      } else {
-        reservationPrice = currentMarketPrice.mul(1.05);
-      }
+    if (dto.type === 'LIMIT' || dto.type === 'STOP_LIMIT') {
+      reservationPrice = new Prisma.Decimal(dto.limitPrice!);
+    } else {
+      reservationPrice = dto.side === 'BUY' ? currentMarketPrice.mul(1.05) : currentMarketPrice.mul(0.95);
     }
 
     const requiredCash = dto.side === 'BUY' ? requestedQuantity.mul(reservationPrice) : new Prisma.Decimal(0);
@@ -88,18 +86,62 @@ export class OrderService {
         
         if (portfolio.userId !== dto.userId) throw new Error('Unauthorized: Portfolio does not belong to user');
 
-        if (dto.side === 'SELL') {
-          await PositionService.checkPosition(tx, dto.portfolioId, dto.symbol, requestedQuantity);
+        let reservedMargin = new Prisma.Decimal(0);
+        const IM_RATE = new Prisma.Decimal('0.50');
+
+        if (portfolio.isMarginEnabled) {
+          // Margin check
+          let currentQty = new Prisma.Decimal(0);
+          const pos = await tx.position.findUnique({
+            where: { portfolioId_symbol: { portfolioId: dto.portfolioId, symbol: dto.symbol } }
+          });
+          if (pos) currentQty = new Prisma.Decimal(pos.quantity);
+
+          let exposureIncreasingQty = new Prisma.Decimal(0);
+          if (dto.side === 'BUY') {
+            if (currentQty.gte(0)) exposureIncreasingQty = requestedQuantity;
+            else {
+              const absQty = currentQty.abs();
+              exposureIncreasingQty = Prisma.Decimal.max(0, requestedQuantity.minus(absQty));
+            }
+          } else {
+            if (currentQty.lte(0)) exposureIncreasingQty = requestedQuantity;
+            else {
+              exposureIncreasingQty = Prisma.Decimal.max(0, requestedQuantity.minus(currentQty));
+            }
+          }
+
+          if (exposureIncreasingQty.gt(0)) {
+            reservedMargin = exposureIncreasingQty.mul(reservationPrice).mul(IM_RATE);
+            
+            // Calculate free margin natively in tx
+            const valuationService = require('./portfolio-valuation.service').PortfolioValuationService;
+            const vs = new valuationService();
+            const val = await vs.getValuation(portfolio.id, tx);
+            const currentFreeMargin = new Prisma.Decimal(val.freeMargin);
+
+            if (currentFreeMargin.lt(reservedMargin)) {
+              throw new Error(`Insufficient Free Margin: Required ${reservedMargin.toFixed(4)}, Available ${currentFreeMargin.toFixed(4)}`);
+            }
+
+            await tx.portfolio.update({
+              where: { id: portfolio.id },
+              data: { lockedMargin: new Prisma.Decimal(portfolio.lockedMargin).plus(reservedMargin) }
+            });
+          }
+        } else {
+          // Cash check
+          if (dto.side === 'BUY') {
+            const availableCash = new Prisma.Decimal(portfolio.totalCash).minus(portfolio.lockedCash);
+            if (availableCash.lt(requiredCash)) throw new Error(`Insufficient funds: Required ${requiredCash.toString()}, Available ${availableCash.toString()}`);
+            await tx.portfolio.update({
+              where: { id: portfolio.id },
+              data: { lockedCash: new Prisma.Decimal(portfolio.lockedCash).plus(requiredCash) }
+            });
+          }
         }
 
-        if (dto.side === 'BUY') {
-          const availableCash = new Prisma.Decimal(portfolio.totalCash).minus(portfolio.lockedCash);
-          if (availableCash.lt(requiredCash)) throw new Error(`Insufficient funds: Required ${requiredCash.toString()}, Available ${availableCash.toString()}`);
-          await tx.portfolio.update({
-            where: { id: portfolio.id },
-            data: { lockedCash: new Prisma.Decimal(portfolio.lockedCash).plus(requiredCash) }
-          });
-        } else if (dto.side === 'SELL') {
+        if (dto.side === 'SELL') {
           await PositionService.lockPosition(tx, dto.portfolioId, dto.symbol, requestedQuantity);
         }
 
@@ -282,12 +324,20 @@ export class OrderService {
           const reservationPrice = new Prisma.Decimal(order.reservationPrice || 0);
           const lockedReleased = fillQty.mul(reservationPrice);
 
+          const updateData: any = {
+            totalCash: new Prisma.Decimal(portfolio.totalCash).minus(actualCost)
+          };
+
+          if (!portfolio.isMarginEnabled) {
+            updateData.lockedCash = new Prisma.Decimal(portfolio.lockedCash).minus(lockedReleased);
+          } else if (order.reservedMargin) {
+            const marginToRelease = new Prisma.Decimal(order.reservedMargin).mul(fillQty).dividedBy(order.requestedQuantity);
+            updateData.lockedMargin = new Prisma.Decimal(portfolio.lockedMargin).minus(marginToRelease);
+          }
+
           await tx.portfolio.update({
             where: { id: portfolio.id },
-            data: {
-              lockedCash: new Prisma.Decimal(portfolio.lockedCash).minus(lockedReleased),
-              totalCash: new Prisma.Decimal(portfolio.totalCash).minus(actualCost)
-            }
+            data: updateData
           });
 
           const { realizedPnl } = await PositionService.adjustOnBuy(tx, order.portfolioId, order.symbol, fillQty, fillPrice);
@@ -371,15 +421,16 @@ export class OrderService {
       const remainingQty = new Prisma.Decimal(order.requestedQuantity).minus(order.filledQuantity);
 
       if (remainingQty.gt(0)) {
+        const portfolio = await tx.portfolio.findUniqueOrThrow({ where: { id: order.portfolioId } });
+        const updateData: any = {};
+        
         if (order.side === 'BUY') {
           const reservationPrice = new Prisma.Decimal(order.reservationPrice || 0);
           const lockedReleased = remainingQty.mul(reservationPrice);
-          const portfolio = await tx.portfolio.findUniqueOrThrow({ where: { id: order.portfolioId } });
           
-          await tx.portfolio.update({
-            where: { id: portfolio.id },
-            data: { lockedCash: new Prisma.Decimal(portfolio.lockedCash).minus(lockedReleased) }
-          });
+          if (!portfolio.isMarginEnabled) {
+            updateData.lockedCash = new Prisma.Decimal(portfolio.lockedCash).minus(lockedReleased);
+          }
         } else {
           const position = await tx.position.findUniqueOrThrow({
             where: { portfolioId_symbol: { portfolioId: order.portfolioId, symbol: order.symbol } }
@@ -388,6 +439,18 @@ export class OrderService {
           await tx.position.update({
             where: { id: position.id },
             data: { lockedQuantity: new Prisma.Decimal(position.lockedQuantity).minus(remainingQty) }
+          });
+        }
+
+        if (portfolio.isMarginEnabled && order.reservedMargin) {
+          const marginToRelease = new Prisma.Decimal(order.reservedMargin).mul(remainingQty).dividedBy(order.requestedQuantity);
+          updateData.lockedMargin = new Prisma.Decimal(portfolio.lockedMargin).minus(marginToRelease);
+        }
+
+        if (Object.keys(updateData).length > 0) {
+          await tx.portfolio.update({
+            where: { id: portfolio.id },
+            data: updateData
           });
         }
       }
@@ -426,15 +489,16 @@ export class OrderService {
       const remainingQty = new Prisma.Decimal(order.requestedQuantity).minus(order.filledQuantity);
 
       if (remainingQty.gt(0)) {
+        const portfolio = await tx.portfolio.findUniqueOrThrow({ where: { id: order.portfolioId } });
+        const updateData: any = {};
+        
         if (order.side === 'BUY') {
           const reservationPrice = new Prisma.Decimal(order.reservationPrice || 0);
           const lockedReleased = remainingQty.mul(reservationPrice);
-          const portfolio = await tx.portfolio.findUniqueOrThrow({ where: { id: order.portfolioId } });
           
-          await tx.portfolio.update({
-            where: { id: portfolio.id },
-            data: { lockedCash: new Prisma.Decimal(portfolio.lockedCash).minus(lockedReleased) }
-          });
+          if (!portfolio.isMarginEnabled) {
+            updateData.lockedCash = new Prisma.Decimal(portfolio.lockedCash).minus(lockedReleased);
+          }
         } else {
           const position = await tx.position.findUniqueOrThrow({
             where: { portfolioId_symbol: { portfolioId: order.portfolioId, symbol: order.symbol } }
@@ -443,6 +507,18 @@ export class OrderService {
           await tx.position.update({
             where: { id: position.id },
             data: { lockedQuantity: new Prisma.Decimal(position.lockedQuantity).minus(remainingQty) }
+          });
+        }
+
+        if (portfolio.isMarginEnabled && order.reservedMargin) {
+          const marginToRelease = new Prisma.Decimal(order.reservedMargin).mul(remainingQty).dividedBy(order.requestedQuantity);
+          updateData.lockedMargin = new Prisma.Decimal(portfolio.lockedMargin).minus(marginToRelease);
+        }
+
+        if (Object.keys(updateData).length > 0) {
+          await tx.portfolio.update({
+            where: { id: portfolio.id },
+            data: updateData
           });
         }
       }

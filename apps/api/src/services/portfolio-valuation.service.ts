@@ -24,6 +24,7 @@ export type PortfolioValuation = {
   freeMargin: string;
   marginLevel: string | null;
   buyingPower: string;
+  marginStatus: "NORMAL" | "MARGIN_CALL";
   
   isStale: boolean;
 };
@@ -34,8 +35,9 @@ export class PortfolioValuationService {
 
   constructor(private prisma: PrismaClient, private priceCache: PriceCacheService) {}
 
-  async getValuation(portfolioId: string): Promise<PortfolioValuation> {
-    const portfolio = await this.prisma.portfolio.findUnique({
+  async getValuation(portfolioId: string, tx?: Prisma.TransactionClient): Promise<PortfolioValuation> {
+    const client = tx || this.prisma;
+    const portfolio = await client.portfolio.findUnique({
       where: { id: portfolioId },
       include: { positions: true }
     });
@@ -116,8 +118,13 @@ export class PortfolioValuationService {
     const buyingPower = freeMargin.gt(0) ? freeMargin.dividedBy(this.IM_RATE) : new Prisma.Decimal(0);
     
     let marginLevel: string | null = null;
+    let marginStatus: "NORMAL" | "MARGIN_CALL" = "NORMAL";
+
     if (maintenanceMargin.gt(0)) {
-      marginLevel = equity.dividedBy(maintenanceMargin).mul(100).toFixed(4);
+      const ml = equity.dividedBy(maintenanceMargin).mul(100);
+      marginLevel = ml.toFixed(4);
+      if (ml.lt(120)) marginStatus = "MARGIN_CALL";
+
     }
 
     return {
@@ -140,6 +147,8 @@ export class PortfolioValuationService {
       freeMargin: freeMargin.toFixed(4),
       marginLevel,
       buyingPower: buyingPower.toFixed(4),
+      marginStatus,
+
       
       isStale
     };

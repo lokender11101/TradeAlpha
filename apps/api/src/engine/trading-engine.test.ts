@@ -116,6 +116,7 @@ describe('TradingEngine Phase 3', () => {
     limitPrice: new Prisma.Decimal(150),
     stopPrice: null,
     reservationPrice: null,
+    reservedMargin: null,
     idempotencyKey: 'test',
     isActivated: false,
     createdAt: new Date(),
