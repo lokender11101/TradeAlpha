@@ -24,6 +24,9 @@ model Portfolio {
   userId     String     @map("user_id")
   totalCash  Decimal    @default(0) @map("total_cash") @db.Decimal(19, 4)
   lockedCash Decimal    @default(0) @map("locked_cash") @db.Decimal(19, 4)
+  isMarginEnabled Boolean    @default(false) @map("is_margin_enabled")
+  lockedMargin    Decimal    @default(0) @map("locked_margin") @db.Decimal(19, 4)
+
   createdAt  DateTime   @default(now()) @map("created_at")
   updatedAt  DateTime   @updatedAt @map("updated_at")
   orders     Order[]
