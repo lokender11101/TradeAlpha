@@ -290,17 +290,15 @@ export class OrderService {
             }
           });
 
-          await PositionService.adjustOnBuy(tx, order.portfolioId, order.symbol, fillQty, fillPrice);
+          const { realizedPnl } = await PositionService.adjustOnBuy(tx, order.portfolioId, order.symbol, fillQty, fillPrice);
+          fillRealizedPnl = realizedPnl;
 
         } else {
           
           const { realizedPnl } = await PositionService.adjustOnSell(tx, order.portfolioId, order.symbol, fillQty, fillPrice);
           fillRealizedPnl = realizedPnl;
 
-          await tx.orderFill.update({
-            where: { id: fill.id },
-            data: { realizedPnl: fillRealizedPnl }
-          });
+
 
           await tx.portfolio.update({
             where: { id: portfolio.id },
@@ -312,6 +310,11 @@ export class OrderService {
 
         const fiatAccount = `user_cash_${order.userId}`;
         const secAccount = `user_sec_${order.userId}_${order.symbol}`;
+        await tx.orderFill.update({
+          where: { id: fill.id },
+          data: { realizedPnl: fillRealizedPnl }
+        });
+
         const platformFiatAccount = `platform_cash`;
         const platformSecAccount = `platform_sec_${order.symbol}`;
 

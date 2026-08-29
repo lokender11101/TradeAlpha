@@ -83,7 +83,7 @@ export function PositionsTable() {
               return (
                 <TableRow key={idx}>
                   <TableCell className="font-medium">{pos.symbol}</TableCell>
-                  <TableCell className="text-right">{pos.quantity}</TableCell>
+                  <TableCell className="text-right"><div className="flex justify-end items-center space-x-2"><span>{Math.abs(parseFloat(pos.quantity))}</span><span className={`text-xs px-1.5 py-0.5 rounded-sm font-semibold ${parseFloat(pos.quantity) >= 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{parseFloat(pos.quantity) >= 0 ? "LONG" : "SHORT"}</span></div></TableCell>
                   <TableCell className="text-right">{parseFloat(pos.averageEntryPrice).toFixed(2)}</TableCell>
                   <TableCell className="text-right">
                     {pos.currentPrice ? (
