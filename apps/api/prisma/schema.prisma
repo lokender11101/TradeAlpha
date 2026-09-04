@@ -19,6 +19,7 @@ model User {
 }
 
 model Portfolio {
+
   id              String  @id @default(uuid())
   userId          String  @map("user_id")
   totalCash       Decimal @default(0) @map("total_cash") @db.Decimal(19, 4)
@@ -34,6 +35,8 @@ model Portfolio {
   snapshots PortfolioSnapshot[]
 
   @@map("portfolios")
+
+  @@index([userId])
 }
 
 model Position {
@@ -124,6 +127,7 @@ model LedgerEntry {
 }
 
 model OutboxEvent {
+
   id            String      @id @default(uuid())
   type          String
   payload       Json
@@ -139,6 +143,8 @@ model OutboxEvent {
   @@index([status, nextRetryAt, createdAt])
   @@index([aggregateType, aggregateId])
   @@map("outbox_events")
+
+  @@index([status, nextRetryAt], map: "idx_outbox_status_retry")
 }
 
 enum OrderSide {

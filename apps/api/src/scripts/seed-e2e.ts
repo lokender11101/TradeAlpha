@@ -56,7 +56,7 @@ async function main() {
   const portfolio = await prisma.portfolio.create({
     data: {
       userId: user.id,
-      totalCash: 1000000,
+      totalCash: 1000000000,
     },
   });
 
