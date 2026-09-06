@@ -14,6 +14,12 @@ async function main() {
   const Redis = require('ioredis');
   const redis = new Redis(redisUrl);
 
+  // Clear rate limits for E2E
+  const rlKeys = await redis.keys('rl:*');
+  if (rlKeys.length > 0) {
+    await redis.del(...rlKeys);
+  }
+
   // Clean up previous test runs if any
   const existingUser = await prisma.user.findUnique({ where: { email: e2eEmail } });
   if (existingUser) {
