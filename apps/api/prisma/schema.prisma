@@ -14,6 +14,7 @@ model User {
   createdAt    DateTime    @default(now()) @map("created_at")
   updatedAt    DateTime    @updatedAt @map("updated_at")
   portfolios   Portfolio[]
+  apiKeys      ApiKey[]
 
   @@map("users")
 }
@@ -227,4 +228,23 @@ model PortfolioSnapshot {
   @@unique([portfolioId, snapshotDate])
   @@index([portfolioId, snapshotDate(sort: Desc)])
   @@map("portfolio_snapshots")
+}
+
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  keyPrefix   String    @map("key_prefix")
+  secretHash  String    @map("secret_hash")
+  name        String
+  scopes      String[]
+  createdAt   DateTime  @default(now()) @map("created_at")
+  revokedAt   DateTime? @map("revoked_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@unique([keyPrefix])
+  @@map("api_keys")
 }
