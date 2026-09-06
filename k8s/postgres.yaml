@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          value: "tradealpha"
+        - name: POSTGRES_PASSWORD
+          value: "password"
+        - name: POSTGRES_DB
+          value: "tradealpha"
+        livenessProbe:
+          exec:
+            command: ["pg_isready", "-U", "tradealpha", "-d", "tradealpha"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "tradealpha", "-d", "tradealpha"]
+          initialDelaySeconds: 2
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: postgres
+  clusterIP: None

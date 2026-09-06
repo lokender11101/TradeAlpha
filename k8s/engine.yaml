@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: engine
+  template:
+    metadata:
+      labels:
+        app: engine
+    spec:
+      containers:
+      - name: engine
+        image: tradealpha-api:latest
+        imagePullPolicy: Never
+        command: ["npm", "run", "start:engine"]
+        envFrom:
+        - configMapRef:
+            name: tradealpha-config
+        - secretRef:
+            name: tradealpha-secrets
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "ps aux | grep main.engine.js | grep -v grep"
+          initialDelaySeconds: 5
+          periodSeconds: 10

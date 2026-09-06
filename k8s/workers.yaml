@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workers
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: workers
+  template:
+    metadata:
+      labels:
+        app: workers
+    spec:
+      containers:
+      - name: workers
+        image: tradealpha-api:latest
+        imagePullPolicy: Never
+        command: ["npm", "run", "start:workers"]
+        envFrom:
+        - configMapRef:
+            name: tradealpha-config
+        - secretRef:
+            name: tradealpha-secrets
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "ps aux | grep main.workers.js | grep -v grep"
+          initialDelaySeconds: 5
+          periodSeconds: 10

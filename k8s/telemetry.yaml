@@ -1,0 +1,121 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+    scrape_configs:
+      - job_name: 'tradealpha-api'
+        static_configs:
+          - targets: ['api:4000']
+      - job_name: 'tradealpha-engine'
+        static_configs:
+          - targets: ['engine:4000']
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+  template:
+    metadata:
+      labels:
+        app: jaeger
+    spec:
+      containers:
+      - name: jaeger
+        image: jaegertracing/all-in-one:latest
+        ports:
+        - containerPort: 16686
+        - containerPort: 4318
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+spec:
+  ports:
+  - name: web
+    port: 16686
+    targetPort: 16686
+  - name: otlp
+    port: 4318
+    targetPort: 4318
+  selector:
+    app: jaeger
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+      - name: prometheus
+        image: prom/prometheus:latest
+        ports:
+        - containerPort: 9090
+        volumeMounts:
+        - name: config
+          mountPath: /etc/prometheus/prometheus.yml
+          subPath: prometheus.yml
+      volumes:
+      - name: config
+        configMap:
+          name: prometheus-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+spec:
+  ports:
+  - port: 9090
+    targetPort: 9090
+  selector:
+    app: prometheus
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:latest
+        ports:
+        - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+spec:
+  ports:
+  - port: 3000
+    targetPort: 3000
+  selector:
+    app: grafana

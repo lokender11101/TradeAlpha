@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feed
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: feed
+  template:
+    metadata:
+      labels:
+        app: feed
+    spec:
+      containers:
+      - name: feed
+        image: tradealpha-api:latest
+        imagePullPolicy: Never
+        command: ["npm", "run", "start:feed"]
+        envFrom:
+        - configMapRef:
+            name: tradealpha-config
+        - secretRef:
+            name: tradealpha-secrets
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "ps aux | grep main.feed.js | grep -v grep"
+          initialDelaySeconds: 5
+          periodSeconds: 10
