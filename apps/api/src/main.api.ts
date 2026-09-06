@@ -66,31 +66,31 @@ app.get('/health', (req: express.Request, res: express.Response) => {
 
 import { MarketController } from './controllers/market.controller';
 
-app.post('/api/orders', orderRateLimiter, requireCsrfToken, authenticateJWT, OrderController.placeOrder);
+app.post('/api/orders', requireCsrfToken, authenticateJWT, orderRateLimiter, OrderController.placeOrder);
 app.get('/api/orders', authenticateJWT, OrderController.getOrders);
 app.get('/api/market/status', marketRateLimiter, MarketController.getStatus);
 app.get('/api/market/candles', marketRateLimiter, MarketController.getCandles);
 app.get('/api/market/execution-profile', MarketController.getExecutionProfile);
-app.delete('/api/orders/:id', orderRateLimiter, requireCsrfToken, authenticateJWT, OrderController.cancelOrder);
+app.delete('/api/orders/:id', requireCsrfToken, authenticateJWT, orderRateLimiter, OrderController.cancelOrder);
 
 
 // Webhook Management Routes (Session Authenticated)
-app.post('/api/webhooks', orderRateLimiter, requireCsrfToken, authenticateJWT, WebhooksController.createWebhook);
+app.post('/api/webhooks', requireCsrfToken, authenticateJWT, orderRateLimiter, WebhooksController.createWebhook);
 app.get('/api/webhooks', authenticateJWT, WebhooksController.listWebhooks);
-app.delete('/api/webhooks/:id', orderRateLimiter, requireCsrfToken, authenticateJWT, WebhooksController.deleteWebhook);
+app.delete('/api/webhooks/:id', requireCsrfToken, authenticateJWT, orderRateLimiter, WebhooksController.deleteWebhook);
 
 // API Key Management Routes (Session Authenticated)
-app.post('/api/keys', orderRateLimiter, requireCsrfToken, authenticateJWT, ApiKeysController.createKey);
+app.post('/api/keys', requireCsrfToken, authenticateJWT, orderRateLimiter, ApiKeysController.createKey);
 app.get('/api/keys', authenticateJWT, ApiKeysController.listKeys);
-app.delete('/api/keys/:id', orderRateLimiter, requireCsrfToken, authenticateJWT, ApiKeysController.revokeKey);
+app.delete('/api/keys/:id', requireCsrfToken, authenticateJWT, orderRateLimiter, ApiKeysController.revokeKey);
 
 
 // Public API Routes (API Key HMAC Authenticated)
-app.post('/api/public/orders', orderRateLimiter, authenticateApiKey, OrderController.placeOrder);
+app.post('/api/public/orders', authenticateApiKey, orderRateLimiter, OrderController.placeOrder);
 app.get('/api/public/orders', authenticateApiKey, OrderController.getOrders);
-app.delete('/api/public/orders/:id', orderRateLimiter, authenticateApiKey, OrderController.cancelOrder);
-app.get('/api/public/portfolios/:portfolioId', portfolioRateLimiter, authenticateApiKey, PortfolioController.getPortfolio);
-app.get('/api/public/portfolios/:portfolioId/positions', portfolioRateLimiter, authenticateApiKey, PortfolioController.getPositions);
+app.delete('/api/public/orders/:id', authenticateApiKey, orderRateLimiter, OrderController.cancelOrder);
+app.get('/api/public/portfolios/:portfolioId', authenticateApiKey, portfolioRateLimiter, PortfolioController.getPortfolio);
+app.get('/api/public/portfolios/:portfolioId/positions', authenticateApiKey, portfolioRateLimiter, PortfolioController.getPositions);
 
 // Portfolio Routes
 app.get('/api/portfolios/:portfolioId', portfolioRateLimiter, authenticateJWT, PortfolioController.getPortfolio);

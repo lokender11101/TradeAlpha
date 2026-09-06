@@ -8,10 +8,13 @@ const redisClient = new Redis(redisUrl, { maxRetriesPerRequest: null });
 
 // Helper to generate key using IP for unauthenticated users, or JWT sub (userId) for authenticated users
 const keyGenerator = (req: Request): string => {
-  if ((req as any).user && (req as any).user.id) {
-    return (req as any).user.id;
+  if ((req as any).apiKeyId) {
+    return `apikey:${(req as any).apiKeyId}`;
   }
-  return req.ip || req.socket.remoteAddress || 'unknown';
+  if ((req as any).user && (req as any).user.id) {
+    return `user:${(req as any).user.id}`;
+  }
+  return `ip:${req.ip || req.socket.remoteAddress || 'unknown'}`;
 };
 
 // A. Authentication Rate Limiter
