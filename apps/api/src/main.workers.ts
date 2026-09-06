@@ -34,6 +34,7 @@ import { EodSweepService } from './services/eod-sweep.service';
 import { OhlcvAggregatorWorker } from './workers/ohlcv-aggregator.worker';
 import { defaultLiquidationTriggerService } from './services/liquidation-trigger.service';
 import { LiquidationWorker } from './workers/liquidation.worker';
+import { WebhookWorker } from './workers/webhook.worker';
 
 const outboxWorker = new OutboxWorker(prisma, redisUrl);
 const executionWorker = new ExecutionWorker(prisma, redisUrl);
@@ -41,6 +42,7 @@ const domainEventDispatcher = new DomainEventDispatcherWorker(redisUrl, orderSer
 const eodSweepService = new EodSweepService(redisUrl, prisma);
 const ohlcvAggregator = new OhlcvAggregatorWorker(prisma, redisUrl);
 const liquidationWorker = new LiquidationWorker();
+const webhookWorker = new WebhookWorker(redisUrl);
 
 if (process.env.NODE_ENV !== 'test') {
   logger.info('[Workers] Starting background workers...');
@@ -64,6 +66,7 @@ if (process.env.NODE_ENV !== 'test') {
     await ohlcvAggregator.stop();
     await defaultLiquidationTriggerService.stop();
     await liquidationWorker.close();
+    await webhookWorker.close();
     await executionWorker.close();
     await domainEventDispatcher.close();
     await prisma.$disconnect();

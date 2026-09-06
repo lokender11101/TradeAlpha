@@ -8,19 +8,19 @@ datasource db {
 }
 
 model User {
-  id           String      @id @default(uuid())
-  email        String      @unique
-  passwordHash String      @map("password_hash")
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
-  portfolios   Portfolio[]
-  apiKeys      ApiKey[]
+  id                  String                @id @default(uuid())
+  email               String                @unique
+  passwordHash        String                @map("password_hash")
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
+  portfolios          Portfolio[]
+  apiKeys             ApiKey[]
+  webhookSubscriptions WebhookSubscription[]
 
   @@map("users")
 }
 
 model Portfolio {
-
   id              String  @id @default(uuid())
   userId          String  @map("user_id")
   totalCash       Decimal @default(0) @map("total_cash") @db.Decimal(19, 4)
@@ -35,9 +35,8 @@ model Portfolio {
   positions Position[]
   snapshots PortfolioSnapshot[]
 
-  @@map("portfolios")
-
   @@index([userId])
+  @@map("portfolios")
 }
 
 model Position {
@@ -128,7 +127,6 @@ model LedgerEntry {
 }
 
 model OutboxEvent {
-
   id            String      @id @default(uuid())
   type          String
   payload       Json
@@ -143,9 +141,8 @@ model OutboxEvent {
 
   @@index([status, nextRetryAt, createdAt])
   @@index([aggregateType, aggregateId])
-  @@map("outbox_events")
-
   @@index([status, nextRetryAt], map: "idx_outbox_status_retry")
+  @@map("outbox_events")
 }
 
 enum OrderSide {
@@ -230,21 +227,32 @@ model PortfolioSnapshot {
   @@map("portfolio_snapshots")
 }
 
-
 model ApiKey {
-  id          String    @id @default(uuid())
-  userId      String    @map("user_id")
-  keyPrefix   String    @map("key_prefix")
-  secretHash  String    @map("secret_hash")
-  name        String
-  scopes      String[]
-  createdAt   DateTime  @default(now()) @map("created_at")
-  revokedAt   DateTime? @map("revoked_at")
-  lastUsedAt  DateTime? @map("last_used_at")
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  keyPrefix  String    @map("key_prefix")
+  secretHash String    @map("secret_hash")
+  name       String
+  scopes     String[]
+  createdAt  DateTime  @default(now()) @map("created_at")
+  revokedAt  DateTime? @map("revoked_at")
+  lastUsedAt DateTime? @map("last_used_at")
 
-  user        User      @relation(fields: [userId], references: [id])
+  user User @relation(fields: [userId], references: [id])
 
-  @@index([userId])
   @@unique([keyPrefix])
+  @@index([userId])
   @@map("api_keys")
+}
+
+model WebhookSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  url       String
+  secret    String
+  events    String[]
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
 }

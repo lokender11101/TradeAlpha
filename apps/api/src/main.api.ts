@@ -28,6 +28,7 @@ const logger = pino({
   }
 });
 
+import { WebhooksController } from './controllers/webhooks.controller';
 import { ApiKeysController } from './controllers/api-keys.controller';
 import { OrderController } from './controllers/order.controller';
 import { PortfolioController } from './controllers/portfolio.controller';
@@ -71,6 +72,12 @@ app.get('/api/market/status', marketRateLimiter, MarketController.getStatus);
 app.get('/api/market/candles', marketRateLimiter, MarketController.getCandles);
 app.get('/api/market/execution-profile', MarketController.getExecutionProfile);
 app.delete('/api/orders/:id', orderRateLimiter, requireCsrfToken, authenticateJWT, OrderController.cancelOrder);
+
+
+// Webhook Management Routes (Session Authenticated)
+app.post('/api/webhooks', orderRateLimiter, requireCsrfToken, authenticateJWT, WebhooksController.createWebhook);
+app.get('/api/webhooks', authenticateJWT, WebhooksController.listWebhooks);
+app.delete('/api/webhooks/:id', orderRateLimiter, requireCsrfToken, authenticateJWT, WebhooksController.deleteWebhook);
 
 // API Key Management Routes (Session Authenticated)
 app.post('/api/keys', orderRateLimiter, requireCsrfToken, authenticateJWT, ApiKeysController.createKey);

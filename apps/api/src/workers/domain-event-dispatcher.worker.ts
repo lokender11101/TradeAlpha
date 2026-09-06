@@ -4,6 +4,7 @@ import Redis from 'ioredis';
 import pino from 'pino';
 import { EventEnvelope } from '../websocket';
 import { OrderService } from '../services/order.service';
+import { PrismaClient } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { runInTrace } from '../utils/telemetry-utils';
 import { SpanKind, propagation, context, trace } from '@opentelemetry/api';
@@ -20,6 +21,8 @@ export class DomainEventDispatcherWorker {
   private readonly emitter: Emitter;
   private readonly orderService: OrderService;
   private readonly liquidationQueue: Queue;
+  private readonly webhookQueue: Queue;
+  private readonly prisma: PrismaClient;
 
   constructor(
     redisUrl: string,
@@ -29,6 +32,8 @@ export class DomainEventDispatcherWorker {
     this.redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
     this.emitter = new Emitter(this.redis);
     this.liquidationQueue = new Queue('liquidation-eval-queue', { connection: this.redis });
+    this.webhookQueue = new Queue('tradealpha-webhooks', { connection: this.redis });
+    this.prisma = new PrismaClient();
     this.orderService = orderService;
 
     this.worker = new Worker(queueName, async (job: Job) => {
@@ -129,12 +134,47 @@ export class DomainEventDispatcherWorker {
           throw error;
         }
       }
+
+      // 3. Dispatch to Webhooks
+      if (portfolioId || (businessPayload as any).userId) {
+        let actualUserId = (businessPayload as any).userId;
+        if (!actualUserId && portfolioId) {
+          const portfolio = await this.prisma.portfolio.findUnique({ where: { id: portfolioId }});
+          actualUserId = portfolio?.userId;
+        }
+
+        if (actualUserId) {
+          const webhooks = await this.prisma.webhookSubscription.findMany({
+            where: { userId: actualUserId, active: true }
+          });
+
+          for (const hook of webhooks) {
+            // Check if this hook subscribes to the event type, or '*'
+            if (hook.events.includes(type) || hook.events.includes('*')) {
+              const jobId = `webhook_${hook.id}_${eventId}`;
+              await this.webhookQueue.add('dispatch-webhook', {
+                webhookId: hook.id,
+                eventId,
+                payload: { eventId, type, timestamp: new Date().toISOString(), payload: businessPayload }
+              }, {
+                jobId,
+                attempts: 5,
+                backoff: { type: 'exponential', delay: 2000 }
+              });
+              logger.info({ eventId, type, webhookId: hook.id }, 'Enqueued webhook dispatch');
+            }
+          }
+        }
+      }
+
     });
   }
 
   public async close(): Promise<void> {
     await this.worker.close();
     await this.liquidationQueue.close();
+    await this.webhookQueue.close();
+    await this.prisma.$disconnect();
     await this.redis.quit();
   }
 }
