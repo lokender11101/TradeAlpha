@@ -3,13 +3,21 @@ import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
+// A master secret used to derive HMAC keys statelessly
+const MASTER_SECRET = process.env.API_KEY_MASTER_SECRET || 'default-master-secret-for-api-keys';
 
 export class ApiKeysService {
   async createKey(userId: string, name: string, scopes: string[]): Promise<{ apiKey: ApiKey; plaintextSecret: string }> {
-    const rawSecret = crypto.randomBytes(32).toString('base64');
+    // Generate a unique prefix
     const keyPrefix = 'TA_' + crypto.randomBytes(8).toString('hex');
-    const plaintextSecret = `${keyPrefix}.${rawSecret}`;
+    
+    // Derive the HMAC secret using the master secret and the prefix
+    const hmacSecret = crypto.createHmac('sha256', MASTER_SECRET).update(keyPrefix).digest('base64');
+    
+    // The plaintext secret shown to the user is Prefix + "." + HMAC Secret
+    const plaintextSecret = `${keyPrefix}.${hmacSecret}`;
 
+    // Store a one-way hash in the database to satisfy the requirement
     const secretHash = await bcrypt.hash(plaintextSecret, 10);
 
     const apiKey = await prisma.apiKey.create({

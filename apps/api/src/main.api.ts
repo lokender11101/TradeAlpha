@@ -32,6 +32,7 @@ import { ApiKeysController } from './controllers/api-keys.controller';
 import { OrderController } from './controllers/order.controller';
 import { PortfolioController } from './controllers/portfolio.controller';
 import { AuthController } from './controllers/auth.controller';
+import { authenticateApiKey } from './middlewares/api-key.middleware';
 import { authenticateJWT } from './middlewares/auth.middleware';
 
 import cookieParser from 'cookie-parser';
@@ -75,6 +76,14 @@ app.delete('/api/orders/:id', orderRateLimiter, requireCsrfToken, authenticateJW
 app.post('/api/keys', orderRateLimiter, requireCsrfToken, authenticateJWT, ApiKeysController.createKey);
 app.get('/api/keys', authenticateJWT, ApiKeysController.listKeys);
 app.delete('/api/keys/:id', orderRateLimiter, requireCsrfToken, authenticateJWT, ApiKeysController.revokeKey);
+
+
+// Public API Routes (API Key HMAC Authenticated)
+app.post('/api/public/orders', orderRateLimiter, authenticateApiKey, OrderController.placeOrder);
+app.get('/api/public/orders', authenticateApiKey, OrderController.getOrders);
+app.delete('/api/public/orders/:id', orderRateLimiter, authenticateApiKey, OrderController.cancelOrder);
+app.get('/api/public/portfolios/:portfolioId', portfolioRateLimiter, authenticateApiKey, PortfolioController.getPortfolio);
+app.get('/api/public/portfolios/:portfolioId/positions', portfolioRateLimiter, authenticateApiKey, PortfolioController.getPositions);
 
 // Portfolio Routes
 app.get('/api/portfolios/:portfolioId', portfolioRateLimiter, authenticateJWT, PortfolioController.getPortfolio);
