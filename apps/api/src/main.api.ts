@@ -3,6 +3,8 @@ setupTelemetry("tradealpha-api");
 
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import { authRateLimiter, orderRateLimiter, portfolioRateLimiter, marketRateLimiter } from './middlewares/rate-limit.middleware';
 import dotenv from 'dotenv';
 import pino from 'pino';
 import { metricsRegistry } from './telemetry';
@@ -38,6 +40,10 @@ import { correlationMiddleware } from './middlewares/correlation.middleware';
 app.use(correlationMiddleware);
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3000', credentials: true }));
 app.use(express.json());
+app.use(helmet({
+  contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
+  crossOriginEmbedderPolicy: false
+}));
 
 app.get('/metrics', async (req, res) => {
   res.set('Content-Type', metricsRegistry.contentType);
@@ -46,8 +52,8 @@ app.get('/metrics', async (req, res) => {
 
 app.use(cookieParser());
 
-app.post('/api/auth/register', AuthController.register);
-app.post('/api/auth/login', AuthController.login);
+app.post('/api/auth/register', authRateLimiter, AuthController.register);
+app.post('/api/auth/login', authRateLimiter, AuthController.login);
 app.post('/api/auth/logout', requireCsrfToken, AuthController.logout);
 app.get('/api/auth/session', AuthController.getSession);
 
@@ -57,16 +63,16 @@ app.get('/health', (req: express.Request, res: express.Response) => {
 
 import { MarketController } from './controllers/market.controller';
 
-app.post('/api/orders', requireCsrfToken, authenticateJWT, OrderController.placeOrder);
+app.post('/api/orders', orderRateLimiter, requireCsrfToken, authenticateJWT, OrderController.placeOrder);
 app.get('/api/orders', authenticateJWT, OrderController.getOrders);
-app.get('/api/market/status', MarketController.getStatus);
-app.get('/api/market/candles', MarketController.getCandles);
+app.get('/api/market/status', marketRateLimiter, MarketController.getStatus);
+app.get('/api/market/candles', marketRateLimiter, MarketController.getCandles);
 app.get('/api/market/execution-profile', MarketController.getExecutionProfile);
-app.delete('/api/orders/:id', requireCsrfToken, authenticateJWT, OrderController.cancelOrder);
+app.delete('/api/orders/:id', orderRateLimiter, requireCsrfToken, authenticateJWT, OrderController.cancelOrder);
 // Portfolio Routes
-app.get('/api/portfolios/:portfolioId', authenticateJWT, PortfolioController.getPortfolio);
-app.get('/api/portfolios/:portfolioId/positions', authenticateJWT, PortfolioController.getPositions);
-app.get('/api/portfolios/:portfolioId/history', authenticateJWT, PortfolioController.getHistory);
+app.get('/api/portfolios/:portfolioId', portfolioRateLimiter, authenticateJWT, PortfolioController.getPortfolio);
+app.get('/api/portfolios/:portfolioId/positions', portfolioRateLimiter, authenticateJWT, PortfolioController.getPositions);
+app.get('/api/portfolios/:portfolioId/history', portfolioRateLimiter, authenticateJWT, PortfolioController.getHistory);
 
 app.use((req: express.Request, res: express.Response, _next: express.NextFunction) => {
   res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });

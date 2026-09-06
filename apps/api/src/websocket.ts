@@ -85,7 +85,21 @@ export class WebSocketServer {
   }
 
   private setupAuthentication() {
-    this.io.use((socket, next) => {
+    this.io.use(async (socket, next) => {
+      // WS Connection Rate Limiting (e.g. 20 connections per minute per IP)
+      const ip = socket.handshake.address || 'unknown';
+      const rlKey = `rl:ws:conn:${ip}`;
+      try {
+        const requests = await this.pubClient.incr(rlKey);
+        if (requests === 1) await this.pubClient.expire(rlKey, 60);
+        if (requests > (process.env.NODE_ENV === 'test' ? 1000 : 20)) {
+          logger.warn({ ip }, 'WebSocket connection rate limit exceeded');
+          return next(new Error('Rate Limit Exceeded'));
+        }
+      } catch (e) {
+        // fail open if redis fails
+      }
+
       // First check auth payload for backward compatibility (e.g. tests)
       let token = socket.handshake.auth?.token;
       
