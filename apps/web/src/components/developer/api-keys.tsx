@@ -23,10 +23,6 @@ export function ApiKeys() {
   const [newKeyName, setNewKeyName] = useState('');
   const [newSecret, setNewSecret] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchKeys();
-  }, []);
-
   const fetchKeys = async () => {
     try {
       const res = await apiFetch('/keys', { method: 'GET' });
@@ -42,6 +38,10 @@ export function ApiKeys() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchKeys();
+  }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

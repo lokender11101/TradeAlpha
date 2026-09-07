@@ -40,6 +40,8 @@ async function main() {
       }
     }
     await prisma.portfolio.deleteMany({ where: { userId: existingUser.id } });
+    await prisma.apiKey.deleteMany({ where: { userId: existingUser.id } });
+    await prisma.webhookSubscription.deleteMany({ where: { userId: existingUser.id } });
     await prisma.user.delete({ where: { id: existingUser.id } });
   }
 

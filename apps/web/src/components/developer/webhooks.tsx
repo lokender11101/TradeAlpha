@@ -22,10 +22,6 @@ export function Webhooks() {
   const [creating, setCreating] = useState(false);
   const [newUrl, setNewUrl] = useState('');
 
-  useEffect(() => {
-    fetchWebhooks();
-  }, []);
-
   const fetchWebhooks = async () => {
     try {
       const res = await apiFetch('/webhooks', { method: 'GET' });
@@ -41,6 +37,10 @@ export function Webhooks() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchWebhooks();
+  }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
