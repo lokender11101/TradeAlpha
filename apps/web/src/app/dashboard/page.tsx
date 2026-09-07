@@ -4,6 +4,8 @@ import { useAuth } from '@/lib/auth-context';
 import { PortfolioMetrics } from '@/components/dashboard/portfolio-metrics';
 import { PositionsTable } from '@/components/dashboard/positions-table';
 import { OpenOrders } from '@/components/dashboard/open-orders';
+import { TradeHistory } from '@/components/dashboard/trade-history';
+import { AccountStatement } from '@/components/dashboard/account-statement';
 import { EquityCurve } from '@/components/dashboard/equity-curve';
 
 export default function DashboardPage() {
@@ -27,6 +29,11 @@ export default function DashboardPage() {
         <PositionsTable />
         <OpenOrders />
       </div>
-    </div>
+    
+      <div className="grid gap-8">
+        <TradeHistory />
+        <AccountStatement />
+      </div>
+</div>
   );
 }

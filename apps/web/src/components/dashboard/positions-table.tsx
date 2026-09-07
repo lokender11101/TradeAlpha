@@ -60,7 +60,7 @@ export function PositionsTable() {
       <div className="p-6 pb-2">
         <h3 className="font-semibold text-lg">Portfolio Positions</h3>
       </div>
-      <Table>
+      <div className="overflow-x-auto"><Table>
         <TableHeader>
           <TableRow>
             <TableHead>Symbol</TableHead>
@@ -136,7 +136,7 @@ export function PositionsTable() {
             })
           )}
         </TableBody>
-      </Table>
+      </Table></div>
     </div>
   );
 }

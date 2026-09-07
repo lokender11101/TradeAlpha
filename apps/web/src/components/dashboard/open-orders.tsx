@@ -78,7 +78,7 @@ export function OpenOrders() {
       <div className="p-6 pb-2">
         <h3 className="font-semibold text-lg">Open Orders</h3>
       </div>
-      <Table>
+      <div className="overflow-x-auto"><Table>
         <TableHeader>
           <TableRow>
             <TableHead>Symbol</TableHead>
@@ -132,7 +132,7 @@ export function OpenOrders() {
             ))
           )}
         </TableBody>
-      </Table>
+      </Table></div>
     </div>
   );
 }

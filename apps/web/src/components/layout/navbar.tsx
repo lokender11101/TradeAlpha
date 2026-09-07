@@ -31,6 +31,13 @@ export function Navbar() {
               >
                 Trading Terminal
               </Link>
+
+              <Link 
+                href="/developer" 
+                className={`text-sm font-medium transition-colors hover:text-primary ${pathname === '/developer' ? 'text-foreground' : 'text-muted-foreground'}`}
+              >
+                Developer
+              </Link>
             </div>
           )}
         </div>

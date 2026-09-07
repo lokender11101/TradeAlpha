@@ -9,7 +9,7 @@ test.describe('Terminal E2E', () => {
     
     // Wait for the API to be ready to avoid ERR_CONNECTION_REFUSED
     await expect(async () => {
-      const response = await request.get('http://localhost:4000/health');
+      const response = await request.get('http://127.0.0.1:4000/health');
       expect(response.ok()).toBeTruthy();
     }).toPass({ timeout: 30000, intervals: [1000] });
   });
@@ -71,9 +71,30 @@ test.describe('Terminal E2E', () => {
     // The order history should show the new order
     await expect(page.locator('td').filter({ hasText: /PENDING|FILLED|PARTIALLY_FILLED/ }).first()).toBeVisible({ timeout: 10000 });
 
+
     // 7. Cancel the PENDING order
     await page.click('button:has-text("Cancel")');
     await expect(page.locator('td', { hasText: 'PENDING' }).first()).toBeHidden({ timeout: 10000 });
+
+    // Place a STOP order
+    await page.click('button:has-text("Stop")');
+    await page.fill('#qty', '5');
+    await page.fill('#stopPrice', '120.00'); // Assuming current is 150
+    await page.click('button:has-text("Place BUY Order")');
+    await expect(page.locator('td').filter({ hasText: /PENDING|FILLED|PARTIALLY_FILLED/ }).first()).toBeVisible({ timeout: 10000 });
+    await page.click('button:has-text("Cancel")');
+    await expect(page.locator('td', { hasText: 'PENDING' }).first()).toBeHidden({ timeout: 10000 });
+
+    // Place a STOP_LIMIT order
+    await page.click('button:has-text("Stop Lmt")');
+    await page.fill('#qty', '5');
+    await page.fill('#price', '130.00'); 
+    await page.fill('#stopPrice', '120.00'); 
+    await page.click('button:has-text("Place BUY Order")');
+    await expect(page.locator('td').filter({ hasText: /PENDING|FILLED|PARTIALLY_FILLED/ }).first()).toBeVisible({ timeout: 10000 });
+    await page.click('button:has-text("Cancel")');
+    await expect(page.locator('td', { hasText: 'PENDING' }).first()).toBeHidden({ timeout: 10000 });
+
 
     // 8. Place a MARKET order
     await page.click('button:has-text("Market")');

@@ -97,6 +97,10 @@ app.get('/api/portfolios/:portfolioId', portfolioRateLimiter, authenticateJWT, P
 app.get('/api/portfolios/:portfolioId/positions', portfolioRateLimiter, authenticateJWT, PortfolioController.getPositions);
 app.get('/api/portfolios/:portfolioId/history', portfolioRateLimiter, authenticateJWT, PortfolioController.getHistory);
 
+app.get('/api/portfolios/:portfolioId/fills', portfolioRateLimiter, authenticateJWT, PortfolioController.getFills);
+app.get('/api/portfolios/:portfolioId/ledger', portfolioRateLimiter, authenticateJWT, PortfolioController.getLedger);
+
+
 app.use((req: express.Request, res: express.Response, _next: express.NextFunction) => {
   res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });
 });

@@ -10,7 +10,8 @@ import { Label } from '@/components/ui/label';
 export function OrderEntry({ symbol }: { symbol: string }) {
   const { user } = useAuth();
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
-  const [type, setType] = useState<'MARKET' | 'LIMIT'>('LIMIT');
+  const [type, setType] = useState<'MARKET' | 'LIMIT' | 'STOP' | 'STOP_LIMIT'>('LIMIT');
+  const [stopPrice, setStopPrice] = useState('');
   const [quantity, setQuantity] = useState('');
   const [price, setPrice] = useState('');
   const [loading, setLoading] = useState(false);
@@ -39,10 +40,13 @@ export function OrderEntry({ symbol }: { symbol: string }) {
         type,
         requestedQuantity: Number(quantity),
         idempotencyKey: crypto.randomUUID(),
-        currentMarketPrice: type === 'MARKET' ? 100 : Number(price),
+        currentMarketPrice: type === 'MARKET' ? 100 : Number(price), // Mock for testing
       };
-      if (type === 'LIMIT') {
+      if (type === 'LIMIT' || type === 'STOP_LIMIT') {
         payload.limitPrice = Number(price);
+      }
+      if (type === 'STOP' || type === 'STOP_LIMIT') {
+        payload.stopPrice = Number(stopPrice);
       }
 
       const res = await apiFetch('/orders', {
@@ -90,26 +94,46 @@ export function OrderEntry({ symbol }: { symbol: string }) {
           </Button>
         </div>
 
-        <div className="flex space-x-2">
+        <div className="grid grid-cols-4 gap-2">
           <Button 
             type="button" 
             variant={type === 'MARKET' ? 'secondary' : 'outline'}
             size="sm"
-            className="w-full text-xs"
+            className="w-full text-xs px-1"
             onClick={() => setType('MARKET')}
             aria-label="Market Order"
           >
-            Market
+            Mkt
           </Button>
           <Button 
             type="button" 
             variant={type === 'LIMIT' ? 'secondary' : 'outline'}
             size="sm"
-            className="w-full text-xs"
+            className="w-full text-xs px-1"
             onClick={() => setType('LIMIT')}
             aria-label="Limit Order"
           >
             Limit
+          </Button>
+          <Button 
+            type="button" 
+            variant={type === 'STOP' ? 'secondary' : 'outline'}
+            size="sm"
+            className="w-full text-xs px-1"
+            onClick={() => setType('STOP')}
+            aria-label="Stop Order"
+          >
+            Stop
+          </Button>
+          <Button 
+            type="button" 
+            variant={type === 'STOP_LIMIT' ? 'secondary' : 'outline'}
+            size="sm"
+            className="w-full text-xs px-1"
+            onClick={() => setType('STOP_LIMIT')}
+            aria-label="Stop Limit Order"
+          >
+            Stop Lmt
           </Button>
         </div>
 

@@ -160,4 +160,77 @@ export class PortfolioController {
       res.status(500).json({ error: { code: 'INTERNAL_SERVER_ERROR', message: error.message } });
     }
   }
+
+  static async getFills(req: AuthenticatedRequest, res: Response) {
+    try {
+      const portfolioId = req.params.portfolioId as string;
+      const userId = req.user?.id || (req as any).user?.userId;
+      
+      const portfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId } });
+      if (!portfolio || portfolio.userId !== userId) {
+        return res.status(404).json({ error: 'Portfolio not found or unauthorized' });
+      }
+
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit = Math.max(1, Math.min(100, parseInt(req.query.limit as string) || 50));
+      const skip = (page - 1) * limit;
+
+      const fills = await prisma.orderFill.findMany({
+        where: { order: { portfolioId } },
+        include: { order: { select: { symbol: true, side: true, type: true } } },
+        orderBy: { executedAt: 'desc' },
+        skip,
+        take: limit
+      });
+
+      const total = await prisma.orderFill.count({
+        where: { order: { portfolioId } }
+      });
+
+      const formattedFills = fills.map((f: any) => ({ ...f, createdAt: f.executedAt }));
+      res.status(200).json({ data: formattedFills, total, page, limit });
+    } catch (error: any) {
+      res.status(500).json({ error: { code: 'INTERNAL_SERVER_ERROR', message: error.message } });
+    }
+  }
+
+  static async getLedger(req: AuthenticatedRequest, res: Response) {
+    try {
+      const portfolioId = req.params.portfolioId as string;
+      const userId = req.user?.id || (req as any).user?.userId;
+      
+      const portfolio = await prisma.portfolio.findUnique({ where: { id: portfolioId } });
+      if (!portfolio || portfolio.userId !== userId) {
+        return res.status(404).json({ error: 'Portfolio not found or unauthorized' });
+      }
+
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit = Math.max(1, Math.min(100, parseInt(req.query.limit as string) || 50));
+      const skip = (page - 1) * limit;
+
+      const entries = await prisma.ledgerEntry.findMany({
+        where: { accountId: { in: [`user_cash_${userId}`, `user_sec_${userId}`] } },
+        include: { transaction: true },
+        orderBy: { transaction: { createdAt: 'desc' } },
+        skip,
+        take: limit
+      });
+
+      const total = await prisma.ledgerEntry.count({
+        where: { accountId: { in: [`user_cash_${userId}`, `user_sec_${userId}`] } }
+      });
+
+      const formattedEntries = entries.map((e: any) => ({
+        ...e,
+        createdAt: e.transaction?.createdAt,
+        entryType: e.credit > 0 ? 'CREDIT' : 'DEBIT',
+        amount: e.credit > 0 ? e.credit : e.debit
+      }));
+
+      res.status(200).json({ data: formattedEntries, total, page, limit });
+    } catch (error: any) {
+      res.status(500).json({ error: { code: 'INTERNAL_SERVER_ERROR', message: error.message } });
+    }
+  }
+
 }
