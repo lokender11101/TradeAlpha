@@ -97,7 +97,7 @@ test.describe('Terminal E2E', () => {
 
 
     // 8. Place a MARKET order
-    await page.click('button:has-text("Market")');
+    await page.click('button:has-text("Mkt")');
     await page.fill('#qty', '5'); // Quantity
     await page.click('button:has-text("Place BUY Order")');
 

@@ -42,7 +42,7 @@ test.describe('Portfolio E2E', () => {
     await page.selectOption('select', 'RELIANCE');
     await expect(page.locator('h3', { hasText: 'Chart - RELIANCE' })).toBeVisible();
 
-    await page.click('button:has-text("Market")');
+    await page.click('button:has-text("Mkt")');
     await page.fill('#qty', '10');
     await page.click('button:has-text("Place BUY Order")');
 

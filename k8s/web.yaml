@@ -26,13 +26,13 @@ spec:
           value: "3000"
         livenessProbe:
           httpGet:
-            path: /next.svg
+            path: /login
             port: 3000
           initialDelaySeconds: 10
           periodSeconds: 15
         readinessProbe:
           httpGet:
-            path: /next.svg
+            path: /login
             port: 3000
           initialDelaySeconds: 5
           periodSeconds: 10

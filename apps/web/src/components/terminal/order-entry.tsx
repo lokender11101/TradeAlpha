@@ -40,7 +40,7 @@ export function OrderEntry({ symbol }: { symbol: string }) {
         type,
         requestedQuantity: Number(quantity),
         idempotencyKey: crypto.randomUUID(),
-        currentMarketPrice: type === 'MARKET' ? 100 : Number(price), // Mock for testing
+        currentMarketPrice: type === 'MARKET' ? 100 : Number(price || stopPrice || 100), // Mock for testing
       };
       if (type === 'LIMIT' || type === 'STOP_LIMIT') {
         payload.limitPrice = Number(price);
@@ -59,6 +59,7 @@ export function OrderEntry({ symbol }: { symbol: string }) {
         setMessage(`Order accepted: ${data.id}`);
         setQuantity('');
         setPrice('');
+        setStopPrice('');
       } else {
         setMessage(`Error: ${data.error || 'Failed'}`);
       }
@@ -142,10 +143,17 @@ export function OrderEntry({ symbol }: { symbol: string }) {
           <Input id="qty" type="number" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} required />
         </div>
 
-        {type === 'LIMIT' && (
+        {(type === 'LIMIT' || type === 'STOP_LIMIT') && (
           <div className="space-y-2">
             <Label htmlFor="price">Price</Label>
             <Input id="price" type="number" step="0.01" min="0.01" value={price} onChange={(e) => setPrice(e.target.value)} required />
+          </div>
+        )}
+
+        {(type === 'STOP' || type === 'STOP_LIMIT') && (
+          <div className="space-y-2">
+            <Label htmlFor="stopPrice">Stop Price</Label>
+            <Input id="stopPrice" type="number" step="0.01" min="0.01" value={stopPrice} onChange={(e) => setStopPrice(e.target.value)} required />
           </div>
         )}
 
