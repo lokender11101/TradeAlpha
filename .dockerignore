@@ -6,3 +6,17 @@ dist
 logs
 coverage
 *.log
+
+# Environment and secret files
+.env
+.env.*
+*.env
+*.env.*
+*.pem
+*.key
+**/.env
+**/.env.*
+**/*.env
+**/*.env.*
+**/*.pem
+**/*.key
